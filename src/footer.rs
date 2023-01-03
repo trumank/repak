@@ -1,4 +1,4 @@
-use std::{io, str::FromStr};
+use std::str::FromStr;
 
 use byteorder::{ReadBytesExt, LE};
 
@@ -17,7 +17,7 @@ pub struct Footer {
 }
 
 impl Footer {
-    pub fn new<R: io::Read>(reader: &mut R, version: &Version) -> Result<Self, super::Error> {
+    pub fn new<R: std::io::Read>(reader: &mut R, version: &Version) -> Result<Self, super::Error> {
         let footer = Footer {
             encryption_guid: (version >= &Version::EncryptionKeyGuid)
                 .then_some(reader.read_guid()?),
@@ -36,14 +36,17 @@ impl Footer {
                         5
                     });
                 for _ in 0..compression.capacity() {
-                    compression.push(Compression::from_str(
-                        &reader
-                            .read_len(32)?
-                            .iter()
-                            // filter out whitespace and convert to char
-                            .filter_map(|&ch| (ch != 0).then_some(ch as char))
-                            .collect::<String>(),
-                    )?)
+                    compression.push(
+                        Compression::from_str(
+                            &reader
+                                .read_len(32)?
+                                .iter()
+                                // filter out whitespace and convert to char
+                                .filter_map(|&ch| (ch != 0).then_some(ch as char))
+                                .collect::<String>(),
+                        )
+                        .unwrap_or_default(),
+                    )
                 }
                 compression
             }),

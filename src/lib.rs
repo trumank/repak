@@ -1,11 +1,12 @@
 #![allow(dead_code)]
+mod entry;
 mod error;
 mod ext;
 mod footer;
-mod pakentry;
-mod pakfile;
+mod index;
+mod pak;
 
-pub use {error::*, ext::*, footer::*, pakentry::*, pakfile::*};
+pub use {entry::*, error::*, ext::*, footer::*, index::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
 
@@ -37,16 +38,20 @@ pub enum Version {
     PathHashIndex, // more compression methods
 }
 
-// i don't want people to need to install strum
+// strum shouldn't need to be installed
 impl Version {
     pub fn iter() -> VersionIter {
         <Version as strum::IntoEnumIterator>::iter()
     }
 }
 
-#[derive(Copy, Clone, Debug, strum::Display, strum::EnumString)]
+#[derive(Default, Copy, Clone, PartialEq, Eq, Debug, strum::Display, strum::EnumString)]
 pub enum Compression {
+    #[default]
+    None,
     Zlib,
+    ZlibBiasMemory,
+    ZlibBiasSpeed,
     Gzip,
     Oodle,
 }

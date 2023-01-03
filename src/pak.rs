@@ -2,13 +2,13 @@ use std::io;
 
 use super::Version;
 
-pub struct PakFile {
+pub struct Pak {
     pub version: Version,
     pub footer: super::Footer,
-    pub entries: hashbrown::HashMap<String, super::PakEntry>,
+    pub entries: hashbrown::HashMap<String, super::Entry>,
 }
 
-impl PakFile {
+impl Pak {
     pub fn new<R: io::Read + io::Seek>(
         version: super::Version,
         mut reader: R,
