@@ -8,7 +8,5 @@ fn main() -> Result<(), un_pak::Error> {
             Err(e) => println!("{e}"),
         }
     }
-    Err(un_pak::Error::PakInvalid(
-        "no version can parse".to_string(),
-    ))
+    Err(un_pak::Error::Other("no version can parse".to_string()))
 }

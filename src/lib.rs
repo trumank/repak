@@ -13,8 +13,8 @@ pub const MAGIC: u32 = 0x5A6F12E1;
 #[repr(u32)]
 #[derive(
     Default,
-    Copy,
     Clone,
+    Copy,
     PartialEq,
     Eq,
     PartialOrd,
@@ -38,14 +38,14 @@ pub enum Version {
     PathHashIndex, // more compression methods
 }
 
-// strum shouldn't need to be installed
+// strum shouldn't need to be installed by users
 impl Version {
     pub fn iter() -> VersionIter {
         <Version as strum::IntoEnumIterator>::iter()
     }
 }
 
-#[derive(Default, Copy, Clone, PartialEq, Eq, Debug, strum::Display, strum::EnumString)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString)]
 pub enum Compression {
     #[default]
     None,

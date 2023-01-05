@@ -5,7 +5,7 @@ use super::Version;
 pub struct Pak {
     pub version: Version,
     pub footer: super::Footer,
-    pub entries: hashbrown::HashMap<String, super::Entry>,
+    pub index: super::Index,
 }
 
 impl Pak {
@@ -17,10 +17,11 @@ impl Pak {
         // parse footer info to get index offset
         let footer = super::Footer::new(&mut reader, &version)?;
         reader.seek(io::SeekFrom::Start(footer.offset))?;
+        let index = super::Index::new(&mut reader, &version)?;
         Ok(Self {
             version,
             footer,
-            entries: hashbrown::HashMap::new(),
+            index,
         })
     }
 }

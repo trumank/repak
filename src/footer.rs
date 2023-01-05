@@ -52,17 +52,10 @@ impl Footer {
             }),
         };
         if super::MAGIC != footer.magic {
-            return Err(super::Error::PakInvalid(format!(
-                "incorrect magic - expected {} but got {}",
-                super::MAGIC,
-                footer.magic
-            )));
+            return Err(super::Error::MagicMismatch(footer.magic));
         }
         if version != &footer.version {
-            return Err(super::Error::PakInvalid(format!(
-                "incorrect version - parsed with {} but is {}",
-                version, footer.version
-            )));
+            return Err(super::Error::VersionMismatch(*version, footer.version));
         }
         Ok(footer)
     }
