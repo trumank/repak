@@ -15,7 +15,11 @@ pub trait ReadExt {
 
 impl<R: std::io::Read> ReadExt for R {
     fn read_bool(&mut self) -> Result<bool, super::Error> {
-        Ok(self.read_u8()? != 0)
+        match self.read_u8()? {
+            1 => Ok(true),
+            0 => Ok(false),
+            err => Err(super::Error::BoolConversion(err)),
+        }
     }
 
     fn read_guid(&mut self) -> Result<[u8; 20], super::Error> {

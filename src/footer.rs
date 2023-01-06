@@ -30,10 +30,9 @@ impl Footer {
             frozen: (version == &Version::FrozenIndex).then_some(reader.read_bool()?),
             compression: (version >= &Version::FNameBasedCompression).then_some({
                 let mut compression =
-                    Vec::with_capacity(if version == &Version::FNameBasedCompression {
-                        4
-                    } else {
-                        5
+                    Vec::with_capacity(match version == &Version::FNameBasedCompression {
+                        true => 4,
+                        false => 5,
                     });
                 for _ in 0..compression.capacity() {
                     compression.push(
