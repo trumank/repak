@@ -1,15 +1,18 @@
 fn main() -> Result<(), un_pak::Error> {
-    for version in un_pak::Version::iter().rev() {
+    let path = std::env::args().nth(1).unwrap_or_default();
+    for version in un_pak::Version::iter() {
+        print!("{version} - ");
         match un_pak::Pak::new(
             version,
-            std::io::BufReader::new(std::io::Cursor::new(include_bytes!("rando_p.pak"))),
+            std::io::BufReader::new(std::fs::OpenOptions::new().read(true).open(&path)?),
         ) {
-            Ok(_) => {
+            Ok(pak) => {
+                print!("{:#?}", pak);
                 println!("parsed successfully!");
-                return Ok(());
             }
             Err(e) => println!("{e}"),
         }
     }
-    Err(un_pak::Error::Other("no version can parse".to_string()))
+    std::thread::sleep_ms(10000);
+    Ok(())
 }

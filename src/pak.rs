@@ -2,6 +2,7 @@ use std::io;
 
 use super::Version;
 
+#[derive(Debug)]
 pub struct Pak {
     pub version: Version,
     pub footer: super::Footer,
@@ -29,8 +30,8 @@ fn footer_size(version: &Version) -> i64 {
     // (magic + version): u32 + (offset + size): u64 + hash: [u8; 20]
     let mut size = 4 + 4 + 8 + 8 + 20;
     if version >= &Version::EncryptionKeyGuid {
-        // encryption guid: [u8; 20]
-        size += 20;
+        // encryption uuid: u128
+        size += 16;
     }
     if version >= &Version::IndexEncryption {
         // encrypted: bool

@@ -2,6 +2,7 @@ use byteorder::{ReadBytesExt, LE};
 
 use super::{Compression, ReadExt, Version};
 
+#[derive(Debug)]
 pub struct Entry {
     pub name: String,
     pub offset: u64,
@@ -43,6 +44,7 @@ impl Entry {
     }
 }
 
+#[derive(Debug)]
 pub struct Block {
     /// start offset relative to the start of the entry header
     pub offset: u64,

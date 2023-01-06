@@ -1,7 +1,5 @@
 use byteorder::{ReadBytesExt, LE};
 
-type R = dyn std::io::Read;
-
 pub trait ReadExt {
     fn read_bool(&mut self) -> Result<bool, super::Error>;
     fn read_guid(&mut self) -> Result<[u8; 20], super::Error>;
@@ -18,7 +16,7 @@ impl<R: std::io::Read> ReadExt for R {
         match self.read_u8()? {
             1 => Ok(true),
             0 => Ok(false),
-            err => Err(super::Error::BoolConversion(err)),
+            err => Err(super::Error::BoolConv(err)),
         }
     }
 
@@ -43,8 +41,7 @@ impl<R: std::io::Read> ReadExt for R {
         Ok(match self.read_i32::<LE>()? {
             size if size.is_positive() => String::from_utf8(self.read_len(size as usize)?)?,
             size if size.is_negative() => {
-                let size = 2 * -size;
-                let mut buf = Vec::with_capacity(size as usize / 2);
+                let mut buf = Vec::with_capacity(-size as usize);
                 for _ in 0..buf.capacity() {
                     buf.push(self.read_u16::<LE>()?);
                 }

@@ -4,8 +4,9 @@ use byteorder::{ReadBytesExt, LE};
 
 use super::{Compression, ReadExt, Version};
 
+#[derive(Debug)]
 pub struct Footer {
-    pub encryption_guid: Option<[u8; 20]>,
+    pub encryption_uuid: Option<u128>,
     pub encrypted: Option<bool>,
     pub magic: u32,
     pub version: Version,
@@ -19,8 +20,8 @@ pub struct Footer {
 impl Footer {
     pub fn new<R: std::io::Read>(reader: &mut R, version: &Version) -> Result<Self, super::Error> {
         let footer = Footer {
-            encryption_guid: (version >= &Version::EncryptionKeyGuid)
-                .then_some(reader.read_guid()?),
+            encryption_uuid: (version >= &Version::EncryptionKeyGuid)
+                .then_some(reader.read_u128::<LE>()?),
             encrypted: (version >= &Version::CompressionEncryption).then_some(reader.read_bool()?),
             magic: reader.read_u32::<LE>()?,
             version: Version::from_repr(reader.read_u32::<LE>()?).unwrap_or_default(),
@@ -51,10 +52,10 @@ impl Footer {
             }),
         };
         if super::MAGIC != footer.magic {
-            return Err(super::Error::MagicMismatch(footer.magic));
+            return Err(super::Error::WrongMagic(footer.magic));
         }
         if version != &footer.version {
-            return Err(super::Error::VersionMismatch(*version, footer.version));
+            return Err(super::Error::WrongVersion(*version, footer.version));
         }
         Ok(footer)
     }
