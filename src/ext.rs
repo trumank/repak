@@ -39,7 +39,6 @@ impl<R: std::io::Read> ReadExt for R {
 
     fn read_string(&mut self) -> Result<String, crate::Error> {
         Ok(match self.read_i32::<LE>()? {
-            size if size.is_positive() => String::from_utf8(self.read_len(size as usize)?)?,
             size if size.is_negative() => {
                 let mut buf = Vec::with_capacity(-size as usize);
                 for _ in 0..buf.capacity() {
@@ -47,12 +46,12 @@ impl<R: std::io::Read> ReadExt for R {
                 }
                 String::from_utf16(&buf)?
             }
-            _ => String::new(),
+            size => String::from_utf8(self.read_len(size as usize)?)?,
         })
     }
 
     fn read_len(&mut self, len: usize) -> Result<Vec<u8>, super::Error> {
-        let mut buf = Vec::with_capacity(len);
+        let mut buf = vec![0; len];
         self.read_exact(&mut buf)?;
         Ok(buf)
     }

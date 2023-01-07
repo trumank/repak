@@ -12,19 +12,10 @@ pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[repr(u32)]
 #[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Debug,
-    strum::Display,
-    strum::FromRepr,
-    strum::EnumIter,
+    Clone, Copy, PartialEq, Eq, PartialOrd, Debug, strum::Display, strum::FromRepr, strum::EnumIter,
 )]
 pub enum Version {
-    Unknown,               // unknown (mostly just for padding :p)
+    Unknown,               // unknown (mostly just for padding)
     Initial,               // initial specification
     NoTimestamps,          // timestamps removed
     CompressionEncryption, // compression and encryption support
@@ -34,8 +25,7 @@ pub enum Version {
     EncryptionKeyGuid,     // include key GUID
     FNameBasedCompression, // compression names included
     FrozenIndex,           // frozen index byte included
-    #[default]
-    PathHashIndex, // more compression methods
+    PathHashIndex,         // more compression methods
 }
 
 // strum shouldn't need to be installed by users

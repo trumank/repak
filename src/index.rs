@@ -7,8 +7,8 @@ pub enum Index {
 }
 
 impl Index {
-    pub fn new<R: std::io::Read>(reader: &mut R, version: &Version) -> Result<Self, super::Error> {
-        Ok(match version < &Version::PathHashIndex {
+    pub fn new<R: std::io::Read>(reader: &mut R, version: Version) -> Result<Self, super::Error> {
+        Ok(match version < Version::PathHashIndex {
             true => Index::WithoutPathHash(IndexV1::new(reader, version)?),
             false => Index::WithPathHash,
         })
@@ -24,7 +24,7 @@ pub struct IndexV1 {
 impl IndexV1 {
     pub fn new<R: std::io::Read>(
         reader: &mut R,
-        version: &super::Version,
+        version: super::Version,
     ) -> Result<Self, super::Error> {
         Ok(Self {
             mount_point: reader.read_string()?,

@@ -17,7 +17,7 @@ pub struct Entry {
 impl Entry {
     pub fn new<R: std::io::Read>(
         reader: &mut R,
-        version: &super::Version,
+        version: super::Version,
     ) -> Result<Self, super::Error> {
         let name = reader.read_string()?;
         let offset = reader.read_u64::<LE>()?;
@@ -35,9 +35,9 @@ impl Entry {
             compressed,
             uncompressed,
             compression_method,
-            timestamp: (version == &Version::Initial).then_some(reader.read_u64::<LE>()?),
+            timestamp: (version == Version::Initial).then_some(reader.read_u64::<LE>()?),
             hash: reader.read_guid()?,
-            compression_blocks: (version >= &Version::CompressionEncryption
+            compression_blocks: (version >= Version::CompressionEncryption
                 && compression_method != Compression::None)
                 .then_some(reader.read_array(Block::new)?),
         })

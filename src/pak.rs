@@ -15,9 +15,9 @@ impl Pak {
         mut reader: R,
     ) -> Result<Self, super::Error> {
         reader.seek(io::SeekFrom::End(-footer_size(&version)))?;
-        let footer = super::Footer::new(&mut reader, &version)?;
+        let footer = super::Footer::new(&mut reader, version)?;
         reader.seek(io::SeekFrom::Start(footer.offset))?;
-        let index = super::Index::new(&mut reader, &version)?;
+        let index = super::Index::new(&mut reader, version)?;
         Ok(Self {
             version,
             footer,
