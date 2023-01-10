@@ -7,13 +7,13 @@ use super::{Compression, ReadExt, Version};
 #[derive(Debug)]
 pub struct Footer {
     pub encryption_uuid: Option<u128>,
-    pub encrypted: Option<bool>,
+    pub encrypted: bool,
     pub magic: u32,
     pub version: Version,
     pub offset: u64,
     pub size: u64,
     pub hash: [u8; 20],
-    pub frozen: Option<bool>,
+    pub frozen: bool,
     pub compression: Option<Vec<Compression>>,
 }
 
@@ -24,19 +24,13 @@ impl Footer {
                 true => Some(reader.read_u128::<LE>()?),
                 false => None,
             },
-            encrypted: match version >= Version::IndexEncryption {
-                true => Some(reader.read_bool()?),
-                false => None,
-            },
+            encrypted: version >= Version::IndexEncryption && reader.read_bool()?,
             magic: reader.read_u32::<LE>()?,
             version: Version::from_repr(reader.read_u32::<LE>()?).unwrap_or(version),
             offset: reader.read_u64::<LE>()?,
             size: reader.read_u64::<LE>()?,
             hash: reader.read_guid()?,
-            frozen: match version == Version::FrozenIndex {
-                true => Some(reader.read_bool()?),
-                false => None,
-            },
+            frozen: version == Version::FrozenIndex && reader.read_bool()?,
             compression: match version >= Version::FNameBasedCompression {
                 true => {
                     let mut compression =

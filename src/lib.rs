@@ -3,10 +3,9 @@ mod entry;
 mod error;
 mod ext;
 mod footer;
-mod index;
 mod pak;
 
-pub use {entry::*, error::*, ext::*, footer::*, index::*, pak::*};
+pub use {entry::*, error::*, ext::*, footer::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
 
@@ -40,8 +39,6 @@ pub enum Compression {
     #[default]
     None,
     Zlib,
-    ZlibBiasMemory,
-    ZlibBiasSpeed,
     Gzip,
     Oodle,
 }
