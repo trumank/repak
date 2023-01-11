@@ -7,7 +7,7 @@ pub struct Entry {
     pub offset: u64,
     pub compressed: u64,
     pub uncompressed: u64,
-    pub compression_method: Compression,
+    pub compression: Compression,
     pub timestamp: Option<u64>,
     pub hash: [u8; 20],
     pub compression_blocks: Option<Vec<Block>>,
@@ -23,7 +23,7 @@ impl Entry {
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
         let uncompressed = reader.read_u64::<LE>()?;
-        let compression_method = match reader.read_u32::<LE>()? {
+        let compression = match reader.read_u32::<LE>()? {
             0x01 | 0x10 | 0x20 => Compression::Zlib,
             _ => Compression::None,
         };
@@ -31,14 +31,14 @@ impl Entry {
             offset,
             compressed,
             uncompressed,
-            compression_method,
+            compression,
             timestamp: match version == Version::Initial {
                 true => Some(reader.read_u64::<LE>()?),
                 false => None,
             },
             hash: reader.read_guid()?,
             compression_blocks: match version >= Version::CompressionEncryption
-                && compression_method != Compression::None
+                && compression != Compression::None
             {
                 true => Some(reader.read_array(Block::new)?),
                 false => None,
