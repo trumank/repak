@@ -54,10 +54,10 @@ impl Footer {
             },
         };
         if super::MAGIC != footer.magic {
-            return Err(super::Error::WrongMagic(footer.magic));
+            return Err(super::Error::Magic(footer.magic));
         }
         if version != footer.version {
-            return Err(super::Error::WrongVersion(version, footer.version));
+            return Err(super::Error::Version(version, footer.version));
         }
         Ok(footer)
     }

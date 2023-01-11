@@ -16,7 +16,7 @@ impl<R: std::io::Read> ReadExt for R {
         match self.read_u8()? {
             1 => Ok(true),
             0 => Ok(false),
-            err => Err(super::Error::BoolConv(err)),
+            err => Err(super::Error::Bool(err)),
         }
     }
 

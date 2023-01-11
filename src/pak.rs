@@ -15,8 +15,8 @@ pub struct Pak {
 
 impl Pak {
     pub fn new<R: io::Read + io::Seek>(
-        version: super::Version,
         mut reader: R,
+        version: super::Version,
     ) -> Result<Self, super::Error> {
         reader.seek(io::SeekFrom::End(-version.size()))?;
         let footer = super::Footer::new(&mut reader, version)?;

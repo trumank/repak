@@ -1,6 +1,23 @@
 use byteorder::{ReadBytesExt, LE};
+use std::io;
 
 use super::{Compression, ReadExt, Version};
+
+#[derive(Debug)]
+pub struct Block {
+    pub offset: u64,
+    /// size of the compressed block
+    pub size: u64,
+}
+
+impl Block {
+    pub fn new<R: io::Read>(reader: &mut R) -> Result<Self, super::Error> {
+        Ok(Self {
+            offset: reader.read_u64::<LE>()?,
+            size: reader.read_u64::<LE>()?,
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct Entry {
@@ -16,10 +33,7 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new<R: std::io::Read>(
-        reader: &mut R,
-        version: super::Version,
-    ) -> Result<Self, super::Error> {
+    pub fn new<R: io::Read>(reader: &mut R, version: super::Version) -> Result<Self, super::Error> {
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
         let uncompressed = reader.read_u64::<LE>()?;
@@ -50,21 +64,14 @@ impl Entry {
             },
         })
     }
-}
 
-#[derive(Debug)]
-pub struct Block {
-    /// start offset relative to the start of the entry header
-    pub offset: u64,
-    /// size of the compressed block
-    pub size: u64,
-}
-
-impl Block {
-    pub fn new<R: std::io::Read>(reader: &mut R) -> Result<Self, super::Error> {
-        Ok(Self {
-            offset: reader.read_u64::<LE>()?,
-            size: reader.read_u64::<LE>()?,
-        })
+    pub fn read<R: io::Read + io::Seek>(
+        self,
+        reader: &mut R,
+        version: super::Version,
+    ) -> Result<Vec<u8>, super::Error> {
+        let buf = io::BufWriter::new(Vec::new());
+        todo!("read the stuff");
+        Ok(buf.into_inner()?)
     }
 }
