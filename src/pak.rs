@@ -10,6 +10,7 @@ pub struct Pak {
     pub version: Version,
     pub footer: super::Footer,
     pub mount_point: String,
+    pub entries: hashbrown::HashMap<String, super::Entry>,
 }
 
 impl Pak {
@@ -21,17 +22,19 @@ impl Pak {
         let footer = super::Footer::new(&mut reader, version)?;
         reader.seek(io::SeekFrom::Start(footer.offset))?;
         let mount_point = reader.read_string()?;
-        let mut entries = hashbrown::HashMap::with_capacity(reader.read_u32::<LE>()? as usize);
-        for _ in 0..entries.capacity() {
+        let len = reader.read_u32::<LE>()? as usize;
+        let mut entries = hashbrown::HashMap::with_capacity(len);
+        for _ in 0..len {
             entries.insert(
-                dbg!(reader.read_string()?),
-                dbg!(super::Entry::new(&mut reader, version)?),
+                reader.read_string()?,
+                super::Entry::new(&mut reader, version)?,
             );
         }
         Ok(Self {
             version,
             footer,
             mount_point,
+            entries,
         })
     }
 }
