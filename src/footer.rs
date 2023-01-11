@@ -57,7 +57,10 @@ impl Footer {
             return Err(super::Error::Magic(footer.magic));
         }
         if version != footer.version {
-            return Err(super::Error::Version(version, footer.version));
+            return Err(super::Error::Version {
+                used: version,
+                version: footer.version,
+            });
         }
         Ok(footer)
     }

@@ -12,8 +12,11 @@ pub enum Error {
     IntoInner(#[from] std::io::IntoInnerError<std::io::BufWriter<Vec<u8>>>),
     #[error("found magic of {0:#x} instead of {:#x}", super::MAGIC)]
     Magic(u32),
-    #[error("used version {0} but pak is version {1}")]
-    Version(super::Version, super::Version),
+    #[error("used version {used} but pak is version {version}")]
+    Version {
+        used: super::Version,
+        version: super::Version,
+    },
     #[error("got {0}, which is not a boolean")]
     Bool(u8),
     #[error("{0}")]
