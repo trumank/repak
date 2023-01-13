@@ -12,6 +12,7 @@ edition = "2021"
 byteorder = "*"
 strum = { version = "*", features = ["derive"] }
 aes = "*"
+flate2 = "*"
 hashbrown = "*"
 thiserror = "*"
 

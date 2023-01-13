@@ -4,16 +4,15 @@ use std::io;
 
 #[derive(Debug)]
 pub struct Block {
-    pub offset: u64,
-    /// size of the compressed block
-    pub size: u64,
+    pub start: u64,
+    pub end: u64,
 }
 
 impl Block {
     pub fn new<R: io::Read>(reader: &mut R) -> Result<Self, super::Error> {
         Ok(Self {
-            offset: reader.read_u64::<LE>()?,
-            size: reader.read_u64::<LE>()?,
+            start: reader.read_u64::<LE>()?,
+            end: reader.read_u64::<LE>()?,
         })
     }
 }
@@ -26,7 +25,7 @@ pub struct Entry {
     pub compression: Compression,
     pub timestamp: Option<u64>,
     pub hash: [u8; 20],
-    pub compression_blocks: Option<Vec<Block>>,
+    pub blocks: Option<Vec<Block>>,
     pub encrypted: bool,
     pub block_uncompressed: Option<u32>,
 }
@@ -51,7 +50,7 @@ impl Entry {
                 false => None,
             },
             hash: reader.read_guid()?,
-            compression_blocks: match version >= Version::CompressionEncryption
+            blocks: match version >= Version::CompressionEncryption
                 && compression != Compression::None
             {
                 true => Some(reader.read_array(Block::new)?),
@@ -90,7 +89,26 @@ impl Entry {
         use io::Write;
         match self.compression {
             Compression::None => buf.write_all(&data)?,
-            Compression::Zlib => todo!(),
+            Compression::Zlib => {
+                let mut decoder = flate2::write::ZlibDecoder::new(buf);
+                match &self.blocks {
+                    Some(blocks) => {
+                        for block in blocks {
+                            decoder.write(
+                                &data[match version >= Version::RelativeChunkOffsets {
+                                    true => {
+                                        (block.start - self.offset) as usize
+                                            ..(block.end - self.offset) as usize
+                                    }
+                                    false => block.start as usize..block.end as usize,
+                                }],
+                            )?;
+                        }
+                    }
+                    None => decoder.write_all(&data)?,
+                }
+                buf = decoder.finish()?;
+            }
             Compression::Gzip => todo!(),
             Compression::Oodle => todo!(),
         }
