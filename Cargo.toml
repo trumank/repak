@@ -11,6 +11,7 @@ edition = "2021"
 [dependencies]
 byteorder = "*"
 strum = { version = "*", features = ["derive"] }
+aes = "*"
 hashbrown = "*"
 thiserror = "*"
 

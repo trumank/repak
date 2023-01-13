@@ -5,6 +5,7 @@ fn main() -> Result<(), un_pak::Error> {
         match un_pak::Pak::new(
             std::io::BufReader::new(std::fs::OpenOptions::new().read(true).open(&path)?),
             ver,
+            None,
         ) {
             Ok(un_pak::Pak { version, .. }) | Err(un_pak::Error::Version { version, .. }) => {
                 println!("{}", version);
