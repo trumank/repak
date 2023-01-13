@@ -1,7 +1,6 @@
+use super::{Compression, ReadExt, Version};
 use byteorder::{ReadBytesExt, LE};
 use std::io;
-
-use super::{Compression, ReadExt, Version};
 
 #[derive(Debug)]
 pub struct Block {
@@ -72,8 +71,30 @@ impl Entry {
         version: super::Version,
         key: Option<&aes::Aes256Dec>,
     ) -> Result<Vec<u8>, super::Error> {
-        let buf = io::BufWriter::new(Vec::new());
-        todo!("read the stuff");
+        let mut buf = io::BufWriter::new(Vec::with_capacity(self.uncompressed as usize));
+        reader.seek(io::SeekFrom::Start(self.offset))?;
+        let mut data = reader.read_len(match self.encrypted {
+            // add alignment (aes block size: 16) then zero out alignment bits
+            true => (self.compressed + 15) & !17,
+            false => self.compressed,
+        } as usize)?;
+        if self.encrypted {
+            if let Some(key) = key {
+                use aes::cipher::BlockDecrypt;
+                for block in data.chunks_mut(16) {
+                    key.decrypt_block(aes::Block::from_mut_slice(block))
+                }
+                data.truncate(self.compressed as usize);
+            }
+        }
+        use io::Write;
+        match self.compression {
+            Compression::None => buf.write_all(&data)?,
+            Compression::Zlib => todo!(),
+            Compression::Gzip => todo!(),
+            Compression::Oodle => todo!(),
+        }
+        buf.flush()?;
         Ok(buf.into_inner()?)
     }
 }

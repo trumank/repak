@@ -1,6 +1,5 @@
-use std::io;
-
 use super::Version;
+use std::io;
 
 #[derive(Debug)]
 pub struct Pak<R: io::Read + io::Seek> {

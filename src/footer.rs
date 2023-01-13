@@ -1,8 +1,6 @@
-use std::str::FromStr;
-
-use byteorder::{ReadBytesExt, LE};
-
 use super::{Compression, ReadExt, Version};
+use byteorder::{ReadBytesExt, LE};
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct Footer {
