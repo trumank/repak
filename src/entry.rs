@@ -34,6 +34,7 @@ pub struct Entry {
 
 impl Entry {
     pub fn new<R: io::Read>(reader: &mut R, version: super::Version) -> Result<Self, super::Error> {
+        // since i need the compression flags, i have to store these as variables which is mildly annoying
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
         let uncompressed = reader.read_u64::<LE>()?;
@@ -66,9 +67,10 @@ impl Entry {
     }
 
     pub fn read<R: io::Read + io::Seek>(
-        self,
+        &self,
         reader: &mut R,
         version: super::Version,
+        key: Option<&aes::Aes256Dec>,
     ) -> Result<Vec<u8>, super::Error> {
         let buf = io::BufWriter::new(Vec::new());
         todo!("read the stuff");
