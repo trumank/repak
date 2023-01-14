@@ -27,18 +27,17 @@ impl<R: io::Read + io::Seek> Pak<R> {
         let mut key = None;
         // decrypt index if needed
         if footer.encrypted {
-            if let Some(hash) = key_hash {
-                use aes::cipher::{BlockDecrypt, KeyInit};
-                match aes::Aes256Dec::new_from_slice(hash) {
-                    Ok(decrypter) => {
-                        for chunk in index.chunks_mut(16) {
-                            decrypter.decrypt_block(aes::Block::from_mut_slice(chunk))
-                        }
-                        key = Some(decrypter);
-                    }
-                    Err(_) => return Err(super::Error::Aes),
-                }
+            let Some(hash) = key_hash else {
+                return Err(super::Error::Encrypted);
+            };
+            use aes::cipher::{BlockDecrypt, KeyInit};
+            let Ok(decrypter)= aes::Aes256Dec::new_from_slice(hash) else {
+                return Err(super::Error::Aes)
+            };
+            for chunk in index.chunks_mut(16) {
+                decrypter.decrypt_block(aes::Block::from_mut_slice(chunk))
             }
+            key = Some(decrypter);
         }
         let mut index = io::Cursor::new(index);
         let mount_point = index.read_string()?;
@@ -71,5 +70,13 @@ impl<R: io::Read + io::Seek> Pak<R> {
         self.entries
             .get(path)
             .map(|entry| entry.read(&mut self.reader, self.version, self.key.as_ref()))
+    }
+
+    pub fn files(&self) -> std::vec::IntoIter<String> {
+        self.entries
+            .keys()
+            .cloned()
+            .collect::<Vec<String>>()
+            .into_iter()
     }
 }

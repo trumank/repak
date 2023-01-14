@@ -14,16 +14,18 @@ pub enum Error {
     Utf16(#[from] std::string::FromUtf16Error),
     #[error("bufwriter dereference: {0}")]
     IntoInner(#[from] std::io::IntoInnerError<std::io::BufWriter<Vec<u8>>>),
-    #[error("found magic of {0:#x} instead of {:#x}", super::MAGIC)]
     // crate errors
+    #[error("got {0}, which is not a boolean")]
+    Bool(u8),
+    #[error("found magic of {0:#x} instead of {:#x}", super::MAGIC)]
     Magic(u32),
     #[error("used version {used} but pak is version {version}")]
     Version {
         used: super::Version,
         version: super::Version,
     },
-    #[error("got {0}, which is not a boolean")]
-    Bool(u8),
+    #[error("pak is encrypted but no key was provided")]
+    Encrypted,
     #[error("{0}")]
     Other(String),
 }

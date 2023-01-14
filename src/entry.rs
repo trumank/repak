@@ -72,19 +72,21 @@ impl Entry {
     ) -> Result<Vec<u8>, super::Error> {
         let mut buf = io::BufWriter::new(Vec::with_capacity(self.uncompressed as usize));
         reader.seek(io::SeekFrom::Start(self.offset))?;
+        Entry::new(reader, version)?;
         let mut data = reader.read_len(match self.encrypted {
             // add alignment (aes block size: 16) then zero out alignment bits
             true => (self.compressed + 15) & !17,
             false => self.compressed,
         } as usize)?;
         if self.encrypted {
-            if let Some(key) = key {
-                use aes::cipher::BlockDecrypt;
-                for block in data.chunks_mut(16) {
-                    key.decrypt_block(aes::Block::from_mut_slice(block))
-                }
-                data.truncate(self.compressed as usize);
+            let Some(key) = key else {
+                return Err(super::Error::Encrypted);
+            };
+            use aes::cipher::BlockDecrypt;
+            for block in data.chunks_mut(16) {
+                key.decrypt_block(aes::Block::from_mut_slice(block))
             }
+            data.truncate(self.compressed as usize);
         }
         use io::Write;
         match self.compression {

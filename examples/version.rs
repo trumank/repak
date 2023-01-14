@@ -7,8 +7,12 @@ fn main() -> Result<(), un_pak::Error> {
             ver,
             None,
         ) {
-            Ok(un_pak::Pak { version, .. }) | Err(un_pak::Error::Version { version, .. }) => {
-                println!("{}", version);
+            Ok(pak) => {
+                println!("{}", pak.version());
+                break;
+            }
+            Err(un_pak::Error::Version { version, .. }) => {
+                println!("{version}");
                 break;
             }
             _ => continue,
