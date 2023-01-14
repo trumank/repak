@@ -1,4 +1,4 @@
-use super::{Compression, ReadExt, Version};
+use super::{ext::ReadExt, Compression, Version};
 use byteorder::{ReadBytesExt, LE};
 use std::str::FromStr;
 

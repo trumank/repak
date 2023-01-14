@@ -27,5 +27,5 @@ pub enum Error {
     #[error("pak is encrypted but no key was provided")]
     Encrypted,
     #[error("{0}")]
-    Other(String),
+    Other(&'static str),
 }

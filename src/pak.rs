@@ -6,7 +6,7 @@ pub struct Pak<R: io::Read + io::Seek> {
     version: Version,
     mount_point: String,
     key: Option<aes::Aes256Dec>,
-    entries: hashbrown::HashMap<String, super::Entry>,
+    entries: hashbrown::HashMap<String, super::entry::Entry>,
     reader: R,
 }
 
@@ -16,11 +16,11 @@ impl<R: io::Read + io::Seek> Pak<R> {
         version: super::Version,
         key_hash: Option<&[u8]>,
     ) -> Result<Self, super::Error> {
-        use super::ReadExt;
+        use super::ext::ReadExt;
         use byteorder::{ReadBytesExt, LE};
         // read footer to get index, encryption & compression info
         reader.seek(io::SeekFrom::End(-version.size()))?;
-        let footer = super::Footer::new(&mut reader, version)?;
+        let footer = super::footer::Footer::new(&mut reader, version)?;
         // read index to get all the entry info
         reader.seek(io::SeekFrom::Start(footer.index_offset))?;
         let mut index = reader.read_len(footer.index_size as usize)?;
@@ -46,7 +46,7 @@ impl<R: io::Read + io::Seek> Pak<R> {
         for _ in 0..len {
             entries.insert(
                 index.read_string()?,
-                super::Entry::new(&mut index, version)?,
+                super::entry::Entry::new(&mut index, version)?,
             );
         }
         Ok(Self {
