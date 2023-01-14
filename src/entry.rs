@@ -90,33 +90,38 @@ impl Entry {
             data.truncate(self.compressed as usize);
         }
         use io::Write;
-        match self.compression {
-            Compression::None => buf.write_all(&data)?,
-            Compression::Zlib => match &self.blocks {
-                Some(blocks) => {
-                    for block in blocks {
+        macro_rules! decompress {
+            ($decompressor: ty) => {
+                match &self.blocks {
+                    Some(blocks) => {
+                        for block in blocks {
+                            io::copy(
+                                &mut <$decompressor>::new(
+                                    &data[match version >= Version::RelativeChunkOffsets {
+                                        true => block.start as usize..block.end as usize,
+                                        false => {
+                                            (block.start - data_offset) as usize
+                                                ..(block.end - data_offset) as usize
+                                        }
+                                    }],
+                                ),
+                                &mut buf,
+                            )?;
+                        }
+                    }
+                    None => {
                         io::copy(
-                            &mut flate2::read::ZlibDecoder::new(
-                                &data[match version >= Version::RelativeChunkOffsets {
-                                    true => block.start as usize..block.end as usize,
-                                    false => {
-                                        (block.start - data_offset) as usize
-                                            ..(block.end - data_offset) as usize
-                                    }
-                                }],
-                            ),
+                            &mut flate2::read::ZlibDecoder::new(data.as_slice()),
                             &mut buf,
                         )?;
                     }
                 }
-                None => {
-                    io::copy(
-                        &mut flate2::read::ZlibDecoder::new(data.as_slice()),
-                        &mut buf,
-                    )?;
-                }
-            },
-            Compression::Gzip => todo!(),
+            };
+        }
+        match self.compression {
+            Compression::None => buf.write_all(&data)?,
+            Compression::Zlib => decompress!(flate2::read::ZlibDecoder<&[u8]>),
+            Compression::Gzip => decompress!(flate2::read::GzDecoder<&[u8]>),
             Compression::Oodle => todo!(),
         }
         buf.flush()?;
