@@ -73,6 +73,7 @@ impl Entry {
         let mut buf = io::BufWriter::new(Vec::with_capacity(self.uncompressed as usize));
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::new(reader, version)?;
+        let data_offset = reader.stream_position()?;
         let mut data = reader.read_len(match self.encrypted {
             // add alignment (aes block size: 16) then zero out alignment bits
             true => (self.compressed + 15) & !17,
@@ -98,11 +99,11 @@ impl Entry {
                         for block in blocks {
                             decoder.write(
                                 &data[match version >= Version::RelativeChunkOffsets {
-                                    true => {
-                                        (block.start - self.offset) as usize
-                                            ..(block.end - self.offset) as usize
+                                    true => block.start as usize..block.end as usize,
+                                    false => {
+                                        (block.start - data_offset) as usize
+                                            ..(block.end - data_offset) as usize
                                     }
-                                    false => block.start as usize..block.end as usize,
                                 }],
                             )?;
                         }
