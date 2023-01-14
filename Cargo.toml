@@ -12,15 +12,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-byteorder = "*"
-strum = { version = "*", features = ["derive"] }
-aes = "*"
-flate2 = "*"
-hashbrown = "*"
-thiserror = "*"
-
-[profile.release]
-strip = true
-lto = true
-codegen-units = 1
-panic = "abort"
+byteorder = "1.4"
+strum = { version = "0.24", features = ["derive"] }
+aes = "0.8"
+flate2 = "1.0"
+hashbrown = "0.13"
+thiserror = "1.0"
