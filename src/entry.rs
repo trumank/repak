@@ -98,7 +98,10 @@ impl Entry {
                             io::copy(
                                 &mut <$decompressor>::new(
                                     &data[match version >= Version::RelativeChunkOffsets {
-                                        true => block.start as usize..block.end as usize,
+                                        true => {
+                                            (block.start - (data_offset - self.offset)) as usize
+                                                ..(block.end - (data_offset - self.offset)) as usize
+                                        }
                                         false => {
                                             (block.start - data_offset) as usize
                                                 ..(block.end - data_offset) as usize

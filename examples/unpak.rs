@@ -7,14 +7,13 @@ fn main() {
         help()
     };
     // can't map key to &[u8] because refers to owned data
-    match match args.next().unwrap_or_default().as_str() {
+    if let Err(e) = match args.next().unwrap_or_default().as_str() {
         "version" => subcommands::version(path, args.next().unwrap_or_default()),
         "list" => subcommands::list(path, args.next().unwrap_or_default()),
         "unpack" | "" => subcommands::unpack(path, args.next().unwrap_or_default()),
         "help" | _ => help(),
     } {
-        Ok(_) => println!("success!"),
-        Err(e) => eprintln!("{e}"),
+        eprintln!("{e}")
     }
 }
 

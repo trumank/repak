@@ -6,12 +6,22 @@ pub fn unpack(path: String, key: String) -> Result<(), unpak::Error> {
             .unwrap_or_default(),
     );
     let mut pak = super::load_pak(path.clone(), key)?;
-    for file in pak.files() {
-        std::fs::create_dir_all(folder.join(&file).parent().expect("will be a file"))?;
-        match pak.get(&file).expect("file should be in pak") {
-            Ok(data) => std::fs::write(folder.join(&file), data)?,
-            Err(e) => eprintln!("{e}"),
+    std::thread::scope(|scope| -> Result<(), unpak::Error> {
+        for file in pak.files() {
+            match pak.get(&file).expect("file should be in pak") {
+                Ok(data) => {
+                    scope.spawn(move || -> Result<(), unpak::Error> {
+                        std::fs::create_dir_all(
+                            folder.join(&file).parent().expect("will be a file"),
+                        )?;
+                        println!("{file}");
+                        std::fs::write(folder.join(&file), data)?;
+                        Ok(())
+                    });
+                }
+                Err(e) => eprintln!("{e}"),
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
