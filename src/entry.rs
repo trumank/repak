@@ -92,12 +92,11 @@ impl Entry {
         use io::Write;
         match self.compression {
             Compression::None => buf.write_all(&data)?,
-            Compression::Zlib => {
-                let mut decoder = flate2::write::ZlibDecoder::new(buf);
-                match &self.blocks {
-                    Some(blocks) => {
-                        for block in blocks {
-                            decoder.write(
+            Compression::Zlib => match &self.blocks {
+                Some(blocks) => {
+                    for block in blocks {
+                        io::copy(
+                            &mut flate2::read::ZlibDecoder::new(
                                 &data[match version >= Version::RelativeChunkOffsets {
                                     true => block.start as usize..block.end as usize,
                                     false => {
@@ -105,13 +104,18 @@ impl Entry {
                                             ..(block.end - data_offset) as usize
                                     }
                                 }],
-                            )?;
-                        }
+                            ),
+                            &mut buf,
+                        )?;
                     }
-                    None => decoder.write_all(&data)?,
                 }
-                buf = decoder.finish()?;
-            }
+                None => {
+                    io::copy(
+                        &mut flate2::read::ZlibDecoder::new(data.as_slice()),
+                        &mut buf,
+                    )?;
+                }
+            },
             Compression::Gzip => todo!(),
             Compression::Oodle => todo!(),
         }
