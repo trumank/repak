@@ -1,8 +1,11 @@
 [package]
-name = "un-pak"
+name = "unpak"
 authors = ["spuds"]
-repository = "https://github.com/bananaturtlesandwich/un-pak"
+repository = "https://github.com/bananaturtlesandwich/unpak"
 description = "a no-nonsense unreal pak parsing crate"
+license = "MIT OR Apache-2.0"
+keywords = ["modding", "parsing", "compression"]
+categories = ["filesystem", "parser-implementations"]
 version = "0.1.0"
 edition = "2021"
 

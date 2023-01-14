@@ -1,8 +1,8 @@
-fn main() -> Result<(), un_pak::Error> {
+fn main() -> Result<(), unpak::Error> {
     // drag onto or open any pak with the example
     let path = std::env::args().nth(1).unwrap_or_default();
-    for ver in un_pak::Version::iter() {
-        match un_pak::Pak::new(
+    for ver in unpak::Version::iter() {
+        match unpak::Pak::new(
             std::io::BufReader::new(std::fs::OpenOptions::new().read(true).open(&path)?),
             ver,
             None,
@@ -11,7 +11,7 @@ fn main() -> Result<(), un_pak::Error> {
                 println!("{}", pak.version());
                 break;
             }
-            Err(un_pak::Error::Version { version, .. }) => {
+            Err(unpak::Error::Version { version, .. }) => {
                 println!("{version}");
                 break;
             }

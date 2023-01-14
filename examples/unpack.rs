@@ -1,7 +1,7 @@
-fn main() -> Result<(), un_pak::Error> {
-    let mut pak = un_pak::Pak::new(
+fn main() -> Result<(), unpak::Error> {
+    let mut pak = unpak::Pak::new(
         std::io::BufReader::new(std::io::Cursor::new(include_bytes!("rando_p.pak"))),
-        un_pak::Version::CompressionEncryption,
+        unpak::Version::CompressionEncryption,
         None,
     )?;
     for file in pak.files() {
