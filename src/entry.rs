@@ -64,13 +64,13 @@ impl Entry {
         })
     }
 
-    pub fn read<R: io::Read + io::Seek>(
+    pub fn read<R: io::Read + io::Seek, W: io::Write>(
         &self,
         reader: &mut R,
         version: super::Version,
         key: Option<&aes::Aes256Dec>,
-    ) -> Result<Vec<u8>, super::Error> {
-        let mut buf = io::BufWriter::new(Vec::with_capacity(self.uncompressed as usize));
+        buf: &mut W,
+    ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::new(reader, version)?;
         let data_offset = reader.stream_position()?;
@@ -89,7 +89,6 @@ impl Entry {
             }
             data.truncate(self.compressed as usize);
         }
-        use io::Write;
         macro_rules! decompress {
             ($decompressor: ty) => {
                 match &self.blocks {
@@ -108,15 +107,12 @@ impl Entry {
                                         }
                                     }],
                                 ),
-                                &mut buf,
+                                buf,
                             )?;
                         }
                     }
                     None => {
-                        io::copy(
-                            &mut flate2::read::ZlibDecoder::new(data.as_slice()),
-                            &mut buf,
-                        )?;
+                        io::copy(&mut flate2::read::ZlibDecoder::new(data.as_slice()), buf)?;
                     }
                 }
             };
@@ -128,6 +124,6 @@ impl Entry {
             Compression::Oodle => todo!(),
         }
         buf.flush()?;
-        Ok(buf.into_inner()?)
+        Ok(())
     }
 }

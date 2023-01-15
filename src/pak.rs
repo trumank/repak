@@ -66,10 +66,17 @@ impl<R: io::Read + io::Seek> Pak<R> {
         &self.mount_point
     }
 
-    pub fn get(&mut self, path: &str) -> Option<Result<Vec<u8>, super::Error>> {
-        self.entries
-            .get(path)
-            .map(|entry| entry.read(&mut self.reader, self.version, self.key.as_ref()))
+    pub fn get(&mut self, path: &str) -> Result<Vec<u8>, super::Error> {
+        let mut data = Vec::new();
+        self.read(path, &mut data)?;
+        Ok(data)
+    }
+
+    pub fn read<W: io::Write>(&mut self, path: &str, writer: &mut W) -> Result<(), super::Error> {
+        match self.entries.get(path) {
+            Some(entry) => entry.read(&mut self.reader, self.version, self.key.as_ref(), writer),
+            None => Err(super::Error::Other("no file found at given path")),
+        }
     }
 
     pub fn files(&self) -> std::vec::IntoIter<String> {
