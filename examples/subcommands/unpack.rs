@@ -1,4 +1,4 @@
-pub fn unpack(path: String, key: String) -> Result<(), unpak::Error> {
+pub fn unpack(path: String, key: Option<String>) -> Result<(), unpak::Error> {
     let folder = std::path::Path::new(
         std::path::Path::new(&path)
             .file_stem()

@@ -5,6 +5,8 @@ pub enum Error {
     Strum(#[from] strum::ParseError),
     #[error("key hash is an incorrect length")]
     Aes,
+    #[error("malformed base64")]
+    Base64,
     // std errors
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

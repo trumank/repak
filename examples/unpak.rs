@@ -8,9 +8,9 @@ fn main() {
     };
     // can't map key to &[u8] because refers to owned data
     if let Err(e) = match args.next().unwrap_or_default().as_str() {
-        "version" => subcommands::version(path, args.next().unwrap_or_default()),
-        "list" => subcommands::list(path, args.next().unwrap_or_default()),
-        "unpack" | "" => subcommands::unpack(path, args.next().unwrap_or_default()),
+        "version" => subcommands::version(path, args.next()),
+        "list" => subcommands::list(path, args.next()),
+        "unpack" | "" => subcommands::unpack(path, args.next()),
         "help" | _ => help(),
     } {
         eprintln!("{e}")
