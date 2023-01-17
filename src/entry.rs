@@ -17,6 +17,11 @@ impl Block {
     }
 }
 
+fn align(offset: u64) -> u64 {
+    // add alignment (aes block size: 16) then zero out alignment bits
+    (offset + 15) & !15
+}
+
 #[derive(Debug)]
 pub struct Entry {
     pub offset: u64,
@@ -24,13 +29,40 @@ pub struct Entry {
     pub uncompressed: u64,
     pub compression: Compression,
     pub timestamp: Option<u64>,
-    pub hash: [u8; 20],
+    pub hash: Option<[u8; 20]>,
     pub blocks: Option<Vec<Block>>,
     pub encrypted: bool,
     pub block_uncompressed: Option<u32>,
 }
 
 impl Entry {
+    pub fn get_serialized_size(
+        version: super::Version,
+        compression: Compression,
+        block_count: u32,
+    ) -> u64 {
+        let mut size = 0;
+        size += 8; // offset
+        size += 8; // compressed
+        size += 8; // uncompressed
+        size += 4; // compression
+        size += match version == Version::Initial {
+            true => 8, // timestamp
+            false => 0,
+        };
+        size += 20; // hash
+        size += match compression != Compression::None {
+            true => 4 + (8 + 8) * block_count as u64, // blocks
+            false => 0,
+        };
+        size += 1; // encrypted
+        size += match version >= Version::CompressionEncryption {
+            true => 4, // blocks uncompressed
+            false => 0,
+        };
+        size
+    }
+
     pub fn new<R: io::Read>(reader: &mut R, version: super::Version) -> Result<Self, super::Error> {
         // since i need the compression flags, i have to store these as variables which is mildly annoying
         let offset = reader.read_u64::<LE>()?;
@@ -49,7 +81,7 @@ impl Entry {
                 true => Some(reader.read_u64::<LE>()?),
                 false => None,
             },
-            hash: reader.read_guid()?,
+            hash: Some(reader.read_guid()?),
             blocks: match version >= Version::CompressionEncryption
                 && compression != Compression::None
             {
@@ -64,6 +96,96 @@ impl Entry {
         })
     }
 
+    pub fn new_encoded<R: io::Read>(
+        reader: &mut R,
+        version: super::Version,
+    ) -> Result<Self, super::Error> {
+        let bits = reader.read_u32::<LE>()?;
+        let compression = match (bits >> 23) & 0x3f {
+            0x01 | 0x10 | 0x20 => Compression::Zlib,
+            _ => Compression::None,
+        };
+
+        let encrypted = (bits & (1 << 22)) != 0;
+        let compression_block_count: u32 = (bits >> 6) & 0xffff;
+        let mut block_uncompressed = bits & 0x3f;
+
+        if block_uncompressed == 0x3f {
+            block_uncompressed = reader.read_u32::<LE>()?;
+        } else {
+            block_uncompressed = block_uncompressed << 11;
+        }
+
+        let mut var_int = |bit: u32| -> Result<_, super::Error> {
+            Ok(if (bits & (1 << bit)) != 0 {
+                reader.read_u32::<LE>()? as u64
+            } else {
+                reader.read_u64::<LE>()?
+            })
+        };
+
+        let offset = var_int(31)?;
+        let uncompressed = var_int(30)?;
+        let compressed = match compression {
+            Compression::None => uncompressed,
+            _ => var_int(29)?,
+        };
+
+        block_uncompressed = if compression_block_count <= 0 {
+            0
+        } else if uncompressed < block_uncompressed.into() {
+            uncompressed.try_into().unwrap()
+        } else {
+            block_uncompressed
+        };
+
+        let offset_base =
+            match version >= super::Version::RelativeChunkOffsets {
+                true => 0,
+                false => offset,
+            } + Entry::get_serialized_size(version, compression, compression_block_count);
+
+        let blocks = if compression_block_count == 1 && !encrypted {
+            Some(vec![Block {
+                start: offset_base,
+                end: offset_base + compressed,
+            }])
+        } else if compression_block_count > 0 {
+            let mut index = offset_base;
+            Some(
+                (0..compression_block_count)
+                    .into_iter()
+                    .map(|_| {
+                        let mut block_size = reader.read_u32::<LE>()? as u64;
+                        let block = Block {
+                            start: index,
+                            end: index + block_size,
+                        };
+                        if encrypted {
+                            block_size = align(block_size);
+                        }
+                        index += block_size;
+                        Ok(block)
+                    })
+                    .collect::<Result<Vec<_>, super::Error>>()?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Entry {
+            offset,
+            compressed,
+            uncompressed,
+            timestamp: None,
+            compression,
+            hash: None,
+            blocks,
+            encrypted,
+            block_uncompressed: Some(block_uncompressed),
+        })
+    }
+
     pub fn read<R: io::Read + io::Seek, W: io::Write>(
         &self,
         reader: &mut R,
@@ -75,8 +197,7 @@ impl Entry {
         Entry::new(reader, version)?;
         let data_offset = reader.stream_position()?;
         let mut data = reader.read_len(match self.encrypted {
-            // add alignment (aes block size: 16) then zero out alignment bits
-            true => (self.compressed + 15) & !15,
+            true => align(self.compressed),
             false => self.compressed,
         } as usize)?;
         if self.encrypted {

@@ -13,6 +13,7 @@ pub const MAGIC: u32 = 0x5A6F12E1;
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Debug, strum::Display, strum::FromRepr, strum::EnumIter,
 )]
+
 pub enum Version {
     Unknown,               // v0 unknown (mostly just for padding)
     Initial,               // v1 initial specification
