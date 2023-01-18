@@ -50,12 +50,8 @@ impl Version {
             size += 1;
         }
         if self >= Version::FNameBasedCompression {
-            // compression names: [[u8; 32]; 4]
-            size += 32 * 4;
-        }
-        if self >= Version::FrozenIndex {
-            // extra compression name: [u8; 32]
-            size += 32
+            // compression names: [[u8; 32]; 5]
+            size += 32 * 5;
         }
         size
     }
