@@ -14,16 +14,18 @@ pub const MAGIC: u32 = 0x5A6F12E1;
     Clone, Copy, PartialEq, Eq, PartialOrd, Debug, strum::Display, strum::FromRepr, strum::EnumIter,
 )]
 pub enum Version {
-    Unknown,               // unknown (mostly just for padding)
-    Initial,               // initial specification
-    NoTimestamps,          // timestamps removed
-    CompressionEncryption, // compression and encryption support
-    IndexEncryption,       // index encryption support
-    RelativeChunkOffsets,  // offsets are relative to header
-    DeleteRecords,         // record deletion support
-    EncryptionKeyGuid,     // include key GUID
-    FNameBasedCompression, // compression names included
-    FrozenIndex,           // frozen index byte included
+    Unknown,               // v0 unknown (mostly just for padding)
+    Initial,               // v1 initial specification
+    NoTimestamps,          // v2 timestamps removed
+    CompressionEncryption, // v3 compression and encryption support
+    IndexEncryption,       // v4 index encryption support
+    RelativeChunkOffsets,  // v5 offsets are relative to header
+    DeleteRecords,         // v6 record deletion support
+    EncryptionKeyGuid,     // v7 include key GUID
+    FNameBasedCompression, // v8 compression names included
+    FrozenIndex,           // v9 frozen index byte included
+    PathHashIndex,         // v10
+    Fnv64BugFix,           // v11
 }
 
 // strum shouldn't need to be installed by users
