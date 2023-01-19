@@ -58,6 +58,7 @@ macro_rules! encryptindex {
                 #[test]
                 fn [< test_version_ $version $compress $encrypt $encryptindex >]() {
                     let mut pak = load_pak(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")), Some(AES_KEY.to_string())).unwrap();
+                    assert_eq!(pak.mount_point(), "../mount/point/root/");
                     assert_eq!(pak.version(), $exp_version);
                     use std::collections::HashSet;
                     let files: HashSet<String> = HashSet::from_iter(pak.files());
