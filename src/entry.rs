@@ -46,7 +46,7 @@ impl Entry {
         size += 8; // compressed
         size += 8; // uncompressed
         size += match version != Version::V8A {
-            true => 4, // 32 bit compression
+            true => 4,  // 32 bit compression
             false => 1, // 8 bit compression
         };
         size += match version.version_major() == VersionMajor::Initial {
@@ -71,7 +71,11 @@ impl Entry {
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
         let uncompressed = reader.read_u64::<LE>()?;
-        let compression = match if version == Version::V8A { reader.read_u8()? as u32 } else { reader.read_u32::<LE>()? } {
+        let compression = match if version == Version::V8A {
+            reader.read_u8()? as u32
+        } else {
+            reader.read_u32::<LE>()?
+        } {
             0x01 | 0x10 | 0x20 => Compression::Zlib,
             _ => Compression::None,
         };
@@ -91,8 +95,10 @@ impl Entry {
                 true => Some(reader.read_array(Block::new)?),
                 false => None,
             },
-            encrypted: version.version_major() >= VersionMajor::CompressionEncryption && reader.read_bool()?,
-            block_uncompressed: match version.version_major() >= VersionMajor::CompressionEncryption {
+            encrypted: version.version_major() >= VersionMajor::CompressionEncryption
+                && reader.read_bool()?,
+            block_uncompressed: match version.version_major() >= VersionMajor::CompressionEncryption
+            {
                 true => Some(reader.read_u32::<LE>()?),
                 false => None,
             },
@@ -116,7 +122,7 @@ impl Entry {
         if block_uncompressed == 0x3f {
             block_uncompressed = reader.read_u32::<LE>()?;
         } else {
-            block_uncompressed = block_uncompressed << 11;
+            block_uncompressed <<= 11;
         }
 
         let mut var_int = |bit: u32| -> Result<_, super::Error> {
@@ -134,7 +140,7 @@ impl Entry {
             _ => var_int(29)?,
         };
 
-        block_uncompressed = if compression_block_count <= 0 {
+        block_uncompressed = if compression_block_count == 0 {
             0
         } else if uncompressed < block_uncompressed.into() {
             uncompressed.try_into().unwrap()
@@ -157,7 +163,6 @@ impl Entry {
             let mut index = offset_base;
             Some(
                 (0..compression_block_count)
-                    .into_iter()
                     .map(|_| {
                         let mut block_size = reader.read_u32::<LE>()? as u64;
                         let block = Block {
@@ -220,7 +225,9 @@ impl Entry {
                         for block in blocks {
                             io::copy(
                                 &mut <$decompressor>::new(
-                                    &data[match version.version_major() >= VersionMajor::RelativeChunkOffsets {
+                                    &data[match version.version_major()
+                                        >= VersionMajor::RelativeChunkOffsets
+                                    {
                                         true => {
                                             (block.start - (data_offset - self.offset)) as usize
                                                 ..(block.end - (data_offset - self.offset)) as usize

@@ -70,12 +70,12 @@ impl Version {
             size += 1;
         }
         if self >= Version::V8A {
-            // compression names: [[u8; 32]; 5]
+            // compression names: [[u8; 32]; 4]
             size += 32 * 4;
         }
         if self >= Version::V8B {
-            // compression names: [[u8; 32]; 5]
-            size += 32 * 1;
+            // additional compression name
+            size += 32;
         }
         size
     }

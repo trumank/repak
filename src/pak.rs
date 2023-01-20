@@ -57,21 +57,11 @@ fn decrypt(key: &Option<aes::Aes256Dec>, bytes: &mut [u8]) -> Result<(), super::
 }
 
 impl<R: io::Read + io::Seek> PakReader<R> {
-    pub fn new_any(
-        mut reader: R,
-        key: Option<aes::Aes256Dec>,
-    ) -> Result<Self, super::Error> {
+    pub fn new_any(mut reader: R, key: Option<aes::Aes256Dec>) -> Result<Self, super::Error> {
         for ver in Version::iter() {
-            match PakReader::new(
-                &mut reader,
-                ver,
-                key.clone(),
-            ) {
+            match PakReader::new(&mut reader, ver, key.clone()) {
                 Ok(pak) => {
-                    return Ok(PakReader {
-                        pak,
-                        reader,
-                    });
+                    return Ok(PakReader { pak, reader });
                 }
                 _ => continue,
             }
@@ -172,7 +162,7 @@ impl<R: io::Read + io::Seek> PakReader<R> {
                         // concat directory with file name to match IndexV1 but should provide a more direct access method
                         let path = format!(
                             "{}{}",
-                            dir_name.strip_prefix("/").unwrap_or(dir_name),
+                            dir_name.strip_prefix('/').unwrap_or(dir_name),
                             file_name
                         );
                         entries_by_path.insert(path, entry);
@@ -224,13 +214,19 @@ impl<R: io::Read + io::Seek> PakReader<R> {
 
     pub fn read<W: io::Write>(&mut self, path: &str, writer: &mut W) -> Result<(), super::Error> {
         match self.pak.index.entries().get(path) {
-            Some(entry) => entry.read(&mut self.reader, self.pak.version, self.pak.key.as_ref(), writer),
+            Some(entry) => entry.read(
+                &mut self.reader,
+                self.pak.version,
+                self.pak.key.as_ref(),
+                writer,
+            ),
             None => Err(super::Error::Other("no file found at given path")),
         }
     }
 
     pub fn files(&self) -> std::vec::IntoIter<String> {
-        self.pak.index
+        self.pak
+            .index
             .entries()
             .keys()
             .cloned()

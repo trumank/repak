@@ -21,5 +21,8 @@ fn load_pak(
         })
         .transpose()?;
 
-    unpak::PakReader::new_any( std::io::BufReader::new(std::fs::OpenOptions::new().read(true).open(&path)?), key)
+    unpak::PakReader::new_any(
+        std::io::BufReader::new(std::fs::OpenOptions::new().read(true).open(&path)?),
+        key,
+    )
 }

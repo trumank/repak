@@ -23,10 +23,12 @@ impl Footer {
                 true => Some(reader.read_u128::<LE>()?),
                 false => None,
             },
-            encrypted: version.version_major() >= VersionMajor::IndexEncryption && reader.read_bool()?,
+            encrypted: version.version_major() >= VersionMajor::IndexEncryption
+                && reader.read_bool()?,
             magic: reader.read_u32::<LE>()?,
             version,
-            version_major: VersionMajor::from_repr(reader.read_u32::<LE>()?).unwrap_or(version.version_major()),
+            version_major: VersionMajor::from_repr(reader.read_u32::<LE>()?)
+                .unwrap_or(version.version_major()),
             index_offset: reader.read_u64::<LE>()?,
             index_size: reader.read_u64::<LE>()?,
             hash: reader.read_guid()?,
