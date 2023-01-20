@@ -1,4 +1,4 @@
-use super::Version;
+use super::{Version, VersionMajor};
 use hashbrown::HashMap;
 use std::io::{self, Seek};
 
@@ -102,7 +102,7 @@ impl<R: io::Read + io::Seek> PakReader<R> {
         let mount_point = index.read_string()?;
         let len = index.read_u32::<LE>()? as usize;
 
-        let index = if version >= Version::PathHashIndex {
+        let index = if version.version_major() >= VersionMajor::PathHashIndex {
             let path_hash_seed = index.read_u64::<LE>()?;
 
             let path_hash_index = if index.read_u32::<LE>()? != 0 {

@@ -1,4 +1,4 @@
-use super::{ext::ReadExt, Compression, Version};
+use super::{ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, LE};
 use std::io;
 
@@ -45,8 +45,11 @@ impl Entry {
         size += 8; // offset
         size += 8; // compressed
         size += 8; // uncompressed
-        size += 4; // compression
-        size += match version == Version::Initial {
+        size += match version != Version::V8A {
+            true => 4, // 32 bit compression
+            false => 1, // 8 bit compression
+        };
+        size += match version.version_major() == VersionMajor::Initial {
             true => 8, // timestamp
             false => 0,
         };
@@ -56,7 +59,7 @@ impl Entry {
             false => 0,
         };
         size += 1; // encrypted
-        size += match version >= Version::CompressionEncryption {
+        size += match version.version_major() >= VersionMajor::CompressionEncryption {
             true => 4, // blocks uncompressed
             false => 0,
         };
@@ -68,7 +71,7 @@ impl Entry {
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
         let uncompressed = reader.read_u64::<LE>()?;
-        let compression = match reader.read_u32::<LE>()? {
+        let compression = match if version == Version::V8A { reader.read_u8()? as u32 } else { reader.read_u32::<LE>()? } {
             0x01 | 0x10 | 0x20 => Compression::Zlib,
             _ => Compression::None,
         };
@@ -77,19 +80,19 @@ impl Entry {
             compressed,
             uncompressed,
             compression,
-            timestamp: match version == Version::Initial {
+            timestamp: match version.version_major() == VersionMajor::Initial {
                 true => Some(reader.read_u64::<LE>()?),
                 false => None,
             },
             hash: Some(reader.read_guid()?),
-            blocks: match version >= Version::CompressionEncryption
+            blocks: match version.version_major() >= VersionMajor::CompressionEncryption
                 && compression != Compression::None
             {
                 true => Some(reader.read_array(Block::new)?),
                 false => None,
             },
-            encrypted: version >= Version::CompressionEncryption && reader.read_bool()?,
-            block_uncompressed: match version >= Version::CompressionEncryption {
+            encrypted: version.version_major() >= VersionMajor::CompressionEncryption && reader.read_bool()?,
+            block_uncompressed: match version.version_major() >= VersionMajor::CompressionEncryption {
                 true => Some(reader.read_u32::<LE>()?),
                 false => None,
             },
@@ -140,7 +143,7 @@ impl Entry {
         };
 
         let offset_base =
-            match version >= super::Version::RelativeChunkOffsets {
+            match version.version_major() >= VersionMajor::RelativeChunkOffsets {
                 true => 0,
                 false => offset,
             } + Entry::get_serialized_size(version, compression, compression_block_count);
@@ -189,7 +192,7 @@ impl Entry {
     pub fn read<R: io::Read + io::Seek, W: io::Write>(
         &self,
         reader: &mut R,
-        version: super::Version,
+        version: Version,
         key: Option<&aes::Aes256Dec>,
         buf: &mut W,
     ) -> Result<(), super::Error> {
@@ -217,7 +220,7 @@ impl Entry {
                         for block in blocks {
                             io::copy(
                                 &mut <$decompressor>::new(
-                                    &data[match version >= Version::RelativeChunkOffsets {
+                                    &data[match version.version_major() >= VersionMajor::RelativeChunkOffsets {
                                         true => {
                                             (block.start - (data_offset - self.offset)) as usize
                                                 ..(block.end - (data_offset - self.offset)) as usize

@@ -65,12 +65,12 @@ macro_rules! encryptindex {
 
 matrix_test!(
     (
-        "v5" unpak::Version::RelativeChunkOffsets,
-        "v7" unpak::Version::EncryptionKeyGuid,
-        "v8a" unpak::Version::FNameBasedCompression,
-        "v8b" unpak::Version::FNameBasedCompression,
-        "v9" unpak::Version::FrozenIndex,
-        "v11" unpak::Version::Fnv64BugFix,
+        "v5" unpak::Version::V5,
+        "v7" unpak::Version::V7,
+        "v8a" unpak::Version::V8A,
+        "v8b" unpak::Version::V8B,
+        "v9" unpak::Version::V9,
+        "v11" unpak::Version::V11,
     ),
     ("", "_compress"),
     ("", "_encrypt"),

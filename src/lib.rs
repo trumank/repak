@@ -9,12 +9,31 @@ pub use {error::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
 
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Debug, strum::Display, strum::FromRepr, strum::EnumIter,
+)]
+pub enum Version {
+    V0,
+    V1,
+    V2,
+    V3,
+    V4,
+    V5,
+    V6,
+    V7,
+    V8A,
+    V8B,
+    V9,
+    V10,
+    V11,
+}
+
 #[repr(u32)]
 #[derive(
     Clone, Copy, PartialEq, Eq, PartialOrd, Debug, strum::Display, strum::FromRepr, strum::EnumIter,
 )]
-
-pub enum Version {
+/// Version actually written to the pak file
+pub enum VersionMajor {
     Unknown,               // v0 unknown (mostly just for padding)
     Initial,               // v1 initial specification
     NoTimestamps,          // v2 timestamps removed
@@ -38,23 +57,46 @@ impl Version {
     pub fn size(self) -> i64 {
         // (magic + version): u32 + (offset + size): u64 + hash: [u8; 20]
         let mut size = 4 + 4 + 8 + 8 + 20;
-        if self >= Version::EncryptionKeyGuid {
+        if self.version_major() >= VersionMajor::EncryptionKeyGuid {
             // encryption uuid: u128
             size += 16;
         }
-        if self >= Version::IndexEncryption {
+        if self.version_major() >= VersionMajor::IndexEncryption {
             // encrypted: bool
             size += 1;
         }
-        if self == Version::FrozenIndex {
+        if self.version_major() == VersionMajor::FrozenIndex {
             // frozen index: bool
             size += 1;
         }
-        if self >= Version::FNameBasedCompression {
+        if self >= Version::V8A {
             // compression names: [[u8; 32]; 5]
-            size += 32 * 5;
+            size += 32 * 4;
+        }
+        if self >= Version::V8B {
+            // compression names: [[u8; 32]; 5]
+            size += 32 * 1;
         }
         size
+    }
+
+    /// Losslessly convert full version into major version
+    pub fn version_major(&self) -> VersionMajor {
+        match self {
+            Version::V0 => VersionMajor::Unknown,
+            Version::V1 => VersionMajor::Initial,
+            Version::V2 => VersionMajor::NoTimestamps,
+            Version::V3 => VersionMajor::CompressionEncryption,
+            Version::V4 => VersionMajor::IndexEncryption,
+            Version::V5 => VersionMajor::RelativeChunkOffsets,
+            Version::V6 => VersionMajor::DeleteRecords,
+            Version::V7 => VersionMajor::EncryptionKeyGuid,
+            Version::V8A => VersionMajor::FNameBasedCompression,
+            Version::V8B => VersionMajor::FNameBasedCompression,
+            Version::V9 => VersionMajor::FrozenIndex,
+            Version::V10 => VersionMajor::PathHashIndex,
+            Version::V11 => VersionMajor::Fnv64BugFix,
+        }
     }
 }
 
