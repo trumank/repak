@@ -76,7 +76,7 @@ impl Entry {
         let data_offset = reader.stream_position()?;
         let mut data = reader.read_len(match self.encrypted {
             // add alignment (aes block size: 16) then zero out alignment bits
-            true => (self.compressed + 15) & !17,
+            true => (self.compressed + 15) & !15,
             false => self.compressed,
         } as usize)?;
         if self.encrypted {
