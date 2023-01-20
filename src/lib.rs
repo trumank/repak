@@ -31,8 +31,8 @@ pub enum Version {
 
 // strum shouldn't need to be installed by users
 impl Version {
-    pub fn iter() -> VersionIter {
-        <Version as strum::IntoEnumIterator>::iter()
+    pub fn iter() -> std::iter::Rev<VersionIter> {
+        <Version as strum::IntoEnumIterator>::iter().rev()
     }
 
     pub fn size(self) -> i64 {

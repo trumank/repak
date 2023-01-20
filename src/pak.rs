@@ -3,12 +3,16 @@ use hashbrown::HashMap;
 use std::io::{self, Seek};
 
 #[derive(Debug)]
-pub struct Pak<R: io::Read + io::Seek> {
+pub struct PakReader<R: io::Read + io::Seek> {
+    pak: Pak,
+    reader: R,
+}
+#[derive(Debug)]
+pub struct Pak {
     version: Version,
     mount_point: String,
     key: Option<aes::Aes256Dec>,
     index: Index,
-    reader: R,
 }
 
 #[derive(Debug)]
@@ -52,12 +56,34 @@ fn decrypt(key: &Option<aes::Aes256Dec>, bytes: &mut [u8]) -> Result<(), super::
     }
 }
 
-impl<R: io::Read + io::Seek> Pak<R> {
+impl<R: io::Read + io::Seek> PakReader<R> {
+    pub fn new_any(
+        mut reader: R,
+        key: Option<aes::Aes256Dec>,
+    ) -> Result<Self, super::Error> {
+        for ver in Version::iter() {
+            match PakReader::new(
+                &mut reader,
+                ver,
+                key.clone(),
+            ) {
+                Ok(pak) => {
+                    return Ok(PakReader {
+                        pak,
+                        reader,
+                    });
+                }
+                _ => continue,
+            }
+        }
+        Err(super::Error::Other("version unsupported"))
+    }
+
     pub fn new(
         mut reader: R,
         version: super::Version,
         key: Option<aes::Aes256Dec>,
-    ) -> Result<Self, super::Error> {
+    ) -> Result<Pak, super::Error> {
         use super::ext::ReadExt;
         use byteorder::{ReadBytesExt, LE};
         // read footer to get index, encryption & compression info
@@ -174,21 +200,20 @@ impl<R: io::Read + io::Seek> Pak<R> {
             Index::V1(IndexV1 { entries })
         };
 
-        Ok(Self {
+        Ok(Pak {
             version,
             mount_point,
             key,
             index,
-            reader,
         })
     }
 
     pub fn version(&self) -> super::Version {
-        self.version
+        self.pak.version
     }
 
     pub fn mount_point(&self) -> &str {
-        &self.mount_point
+        &self.pak.mount_point
     }
 
     pub fn get(&mut self, path: &str) -> Result<Vec<u8>, super::Error> {
@@ -198,14 +223,14 @@ impl<R: io::Read + io::Seek> Pak<R> {
     }
 
     pub fn read<W: io::Write>(&mut self, path: &str, writer: &mut W) -> Result<(), super::Error> {
-        match self.index.entries().get(path) {
-            Some(entry) => entry.read(&mut self.reader, self.version, self.key.as_ref(), writer),
+        match self.pak.index.entries().get(path) {
+            Some(entry) => entry.read(&mut self.reader, self.pak.version, self.pak.key.as_ref(), writer),
             None => Err(super::Error::Other("no file found at given path")),
         }
     }
 
     pub fn files(&self) -> std::vec::IntoIter<String> {
-        self.index
+        self.pak.index
             .entries()
             .keys()
             .cloned()

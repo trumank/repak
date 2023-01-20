@@ -1,37 +1,6 @@
-fn load_pak(
-    bytes: &[u8],
-    key: Option<String>,
-) -> Result<unpak::Pak<std::io::Cursor<&[u8]>>, unpak::Error> {
-    use aes::cipher::KeyInit;
-    use base64::{engine::general_purpose, Engine as _};
-    let key = key
-        .map(|k| {
-            general_purpose::STANDARD
-                .decode(k)
-                .as_ref()
-                .map_err(|_| unpak::Error::Base64)
-                .and_then(|bytes| {
-                    aes::Aes256Dec::new_from_slice(bytes).map_err(|_| unpak::Error::Aes)
-                })
-        })
-        .transpose()?;
-
-    for ver in unpak::Version::iter() {
-        match unpak::Pak::new(std::io::Cursor::new(bytes), ver, key.clone()) {
-            Ok(pak) => {
-                return Ok(pak);
-            }
-            _ => {
-                continue;
-            }
-        }
-    }
-    Err(unpak::Error::Other("version unsupported"))
-}
+use paste::paste;
 
 static AES_KEY: &str = "lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=";
-
-use paste::paste;
 
 macro_rules! matrix_test {
     ( ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt ) => {
@@ -57,7 +26,19 @@ macro_rules! encryptindex {
             paste! {
                 #[test]
                 fn [< test_version_ $version $compress $encrypt $encryptindex >]() {
-                    let mut pak = load_pak(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")), Some(AES_KEY.to_string())).unwrap();
+                    use aes::cipher::KeyInit;
+                    use base64::{engine::general_purpose, Engine as _};
+                    let key = general_purpose::STANDARD
+                                .decode(AES_KEY)
+                                .as_ref()
+                                .map_err(|_| unpak::Error::Base64)
+                                .and_then(|bytes| {
+                                    aes::Aes256Dec::new_from_slice(bytes).map_err(|_| unpak::Error::Aes)
+                                }).unwrap();
+                    let mut pak = unpak::PakReader::new_any(
+                        std::io::Cursor::new(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak"))),
+                        Some(key),
+                    ).unwrap();
                     assert_eq!(pak.mount_point(), "../mount/point/root/");
                     assert_eq!(pak.version(), $exp_version);
                     use std::collections::HashSet;
