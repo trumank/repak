@@ -12,7 +12,10 @@ unreal-version-for() {
     7)
       echo -n "$UNREAL_4_21"
       ;;
-    8)
+    8a)
+      echo -n "$UNREAL_4_22"
+      ;;
+    8b)
       echo -n "$UNREAL_4_23"
       ;;
     9)
@@ -26,7 +29,7 @@ unreal-version-for() {
 
 generate() {
   rm -r packs && mkdir packs
-  _version=(5 7 8 9 11)
+  _version=(5 7 8a 8b 9 11)
   _compress=("" "-compress")
   _encrypt=("" "-encrypt")
   _encryptindex=("" "-encryptindex")

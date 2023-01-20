@@ -67,7 +67,8 @@ matrix_test!(
     (
         "v5" unpak::Version::RelativeChunkOffsets,
         "v7" unpak::Version::EncryptionKeyGuid,
-        "v8" unpak::Version::FNameBasedCompression,
+        "v8a" unpak::Version::FNameBasedCompression,
+        "v8b" unpak::Version::FNameBasedCompression,
         "v9" unpak::Version::FrozenIndex,
         "v11" unpak::Version::Fnv64BugFix,
     ),
