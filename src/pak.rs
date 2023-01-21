@@ -56,6 +56,12 @@ fn decrypt(key: &Option<aes::Aes256Dec>, bytes: &mut [u8]) -> Result<(), super::
     }
 }
 
+impl<R: io::Seek + io::Read> PakReader<R> {
+    pub fn into_reader(self) -> R {
+        self.reader
+    }
+}
+
 impl<R: io::Read + io::Seek> PakReader<R> {
     pub fn new_any(mut reader: R, key: Option<aes::Aes256Dec>) -> Result<Self, super::Error> {
         for ver in Version::iter() {
