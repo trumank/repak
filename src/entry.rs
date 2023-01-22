@@ -1,6 +1,12 @@
-use super::{ext::ReadExt, Compression, Version, VersionMajor};
-use byteorder::{ReadBytesExt, LE};
+use super::{ext::ReadExt, ext::WriteExt, Compression, Version, VersionMajor};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
+
+#[derive(Debug)]
+pub enum EntryLocation {
+    Data,
+    Index,
+}
 
 #[derive(Debug)]
 pub struct Block {
@@ -9,11 +15,17 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new<R: io::Read>(reader: &mut R) -> Result<Self, super::Error> {
+    pub fn read<R: io::Read>(reader: &mut R) -> Result<Self, super::Error> {
         Ok(Self {
             start: reader.read_u64::<LE>()?,
             end: reader.read_u64::<LE>()?,
         })
+    }
+
+    pub fn write<W: io::Write>(&self, writer: &mut W) -> Result<(), super::Error> {
+        writer.write_u64::<LE>(self.start)?;
+        writer.write_u64::<LE>(self.end)?;
+        Ok(())
     }
 }
 
@@ -66,7 +78,10 @@ impl Entry {
         size
     }
 
-    pub fn new<R: io::Read>(reader: &mut R, version: super::Version) -> Result<Self, super::Error> {
+    pub fn read<R: io::Read>(
+        reader: &mut R,
+        version: super::Version,
+    ) -> Result<Self, super::Error> {
         // since i need the compression flags, i have to store these as variables which is mildly annoying
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
@@ -92,7 +107,7 @@ impl Entry {
             blocks: match version.version_major() >= VersionMajor::CompressionEncryption
                 && compression != Compression::None
             {
-                true => Some(reader.read_array(Block::new)?),
+                true => Some(reader.read_array(Block::read)?),
                 false => None,
             },
             encrypted: version.version_major() >= VersionMajor::CompressionEncryption
@@ -104,8 +119,50 @@ impl Entry {
             },
         })
     }
+    pub fn write<W: io::Write>(
+        &self,
+        writer: &mut W,
+        version: super::Version,
+        location: EntryLocation,
+    ) -> Result<(), super::Error> {
+        writer.write_u64::<LE>(match location {
+            EntryLocation::Data => 0,
+            EntryLocation::Index => self.offset,
+        })?;
+        writer.write_u64::<LE>(self.compressed)?;
+        writer.write_u64::<LE>(self.uncompressed)?;
+        let compression: u8 = match self.compression {
+            Compression::None => 0,
+            Compression::Zlib => 1,
+            Compression::Gzip => todo!(),
+            Compression::Oodle => todo!(),
+        };
+        match version {
+            Version::V8A => writer.write_u8(compression)?,
+            _ => writer.write_u32::<LE>(compression.into())?,
+        }
 
-    pub fn new_encoded<R: io::Read>(
+        if version.version_major() == VersionMajor::Initial {
+            writer.write_u64::<LE>(self.timestamp.unwrap_or_default())?;
+        }
+        if let Some(hash) = self.hash {
+            writer.write_all(&hash)?;
+        } else {
+            panic!("hash missing");
+        }
+        if version.version_major() >= VersionMajor::CompressionEncryption {
+            if let Some(blocks) = &self.blocks {
+                for block in blocks {
+                    block.write(writer)?;
+                }
+            }
+            writer.write_bool(self.encrypted)?;
+            writer.write_u32::<LE>(self.block_uncompressed.unwrap_or_default())?;
+        }
+        Ok(())
+    }
+
+    pub fn read_encoded<R: io::Read>(
         reader: &mut R,
         version: super::Version,
     ) -> Result<Self, super::Error> {
@@ -194,7 +251,7 @@ impl Entry {
         })
     }
 
-    pub fn read<R: io::Read + io::Seek, W: io::Write>(
+    pub fn read_file<R: io::Read + io::Seek, W: io::Write>(
         &self,
         reader: &mut R,
         version: Version,
@@ -202,7 +259,7 @@ impl Entry {
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
-        Entry::new(reader, version)?;
+        Entry::read(reader, version)?;
         let data_offset = reader.stream_position()?;
         let mut data = reader.read_len(match self.encrypted {
             true => align(self.compressed),
@@ -256,5 +313,24 @@ impl Entry {
         }
         buf.flush()?;
         Ok(())
+    }
+}
+
+mod test {
+    #[test]
+    fn test_entry() {
+        let data = vec![
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x54, 0x02, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x54, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0xDD, 0x94, 0xFD, 0xC3, 0x5F, 0xF5, 0x91, 0xA9, 0x9A, 0x5E, 0x14, 0xDC, 0x9B,
+            0xD3, 0x58, 0x89, 0x78, 0xA6, 0x1C, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let mut out = vec![];
+        let entry = super::Entry::read(&mut std::io::Cursor::new(data.clone()), super::Version::V5)
+            .unwrap();
+        entry
+            .write(&mut out, super::Version::V5, super::EntryLocation::Data)
+            .unwrap();
+        assert_eq!(&data, &out);
     }
 }

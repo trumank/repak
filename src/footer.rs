@@ -1,5 +1,7 @@
+use crate::ext::WriteExt;
+
 use super::{ext::ReadExt, Compression, Version, VersionMajor};
-use byteorder::{ReadBytesExt, LE};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::str::FromStr;
 
 #[derive(Debug)]
@@ -17,7 +19,7 @@ pub struct Footer {
 }
 
 impl Footer {
-    pub fn new<R: std::io::Read>(reader: &mut R, version: Version) -> Result<Self, super::Error> {
+    pub fn read<R: std::io::Read>(reader: &mut R, version: Version) -> Result<Self, super::Error> {
         let footer = Self {
             encryption_uuid: match version.version_major() >= VersionMajor::EncryptionKeyGuid {
                 true => Some(reader.read_u128::<LE>()?),
@@ -65,5 +67,28 @@ impl Footer {
             });
         }
         Ok(footer)
+    }
+
+    pub fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), super::Error> {
+        if self.version_major >= VersionMajor::EncryptionKeyGuid {
+            writer.write_u128::<LE>(0)?;
+        }
+        if self.version_major >= VersionMajor::IndexEncryption {
+            writer.write_bool(self.encrypted)?;
+        }
+        writer.write_u32::<LE>(self.magic)?;
+        writer.write_u32::<LE>(self.version_major as u32)?;
+        writer.write_u64::<LE>(self.index_offset)?;
+        writer.write_u64::<LE>(self.index_size)?;
+        writer.write_all(&self.hash)?;
+        let algo_size = match self.version {
+            ver if ver < Version::V8A => 0,
+            ver if ver < Version::V8B => 4,
+            _ => 5,
+        };
+        for _ in 0..algo_size {
+            writer.write_all(&[0; 32])?;
+        }
+        Ok(())
     }
 }

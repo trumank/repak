@@ -134,7 +134,7 @@ macro_rules! encryptindex {
                     for file in files {
                         let mut buf = vec![];
                         let mut writer = std::io::Cursor::new(&mut buf);
-                        pak.read(&file, &mut writer).unwrap();
+                        pak.read_file(&file, &mut writer).unwrap();
                         match file.as_str() {
                             "test.txt" => assert_eq!(buf, include_bytes!("pack/root/test.txt"), "test.txt incorrect contents"),
                             "test.png" => assert_eq!(buf, include_bytes!("pack/root/test.png"), "test.png incorrect contents"),

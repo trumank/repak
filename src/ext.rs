@@ -1,4 +1,4 @@
-use byteorder::{ReadBytesExt, LE};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 pub trait ReadExt {
     fn read_bool(&mut self) -> Result<bool, super::Error>;
@@ -9,6 +9,11 @@ pub trait ReadExt {
     ) -> Result<Vec<T>, super::Error>;
     fn read_string(&mut self) -> Result<String, super::Error>;
     fn read_len(&mut self, len: usize) -> Result<Vec<u8>, super::Error>;
+}
+
+pub trait WriteExt {
+    fn write_bool(&mut self, value: bool) -> Result<(), super::Error>;
+    fn write_string(&mut self, value: &str) -> Result<(), super::Error>;
 }
 
 impl<R: std::io::Read> ReadExt for R {
@@ -37,7 +42,7 @@ impl<R: std::io::Read> ReadExt for R {
         Ok(buf)
     }
 
-    fn read_string(&mut self) -> Result<String, crate::Error> {
+    fn read_string(&mut self) -> Result<String, super::Error> {
         let mut buf = match self.read_i32::<LE>()? {
             size if size.is_negative() => {
                 let mut buf = Vec::with_capacity(-size as usize);
@@ -57,5 +62,22 @@ impl<R: std::io::Read> ReadExt for R {
         let mut buf = vec![0; len];
         self.read_exact(&mut buf)?;
         Ok(buf)
+    }
+}
+
+impl<W: std::io::Write> WriteExt for W {
+    fn write_bool(&mut self, value: bool) -> Result<(), super::Error> {
+        self.write_u8(match value {
+            true => 1,
+            false => 0,
+        })?;
+        Ok(())
+    }
+    fn write_string(&mut self, value: &str) -> Result<(), super::Error> {
+        let bytes = value.as_bytes();
+        self.write_u32::<LE>(bytes.len() as u32 + 1)?;
+        self.write_all(bytes)?;
+        self.write_u8(0)?;
+        Ok(())
     }
 }
