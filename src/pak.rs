@@ -384,10 +384,12 @@ impl Pak {
     }
 }
 
+#[cfg(test)]
 mod test {
+    use std::io::Cursor;
+
     #[test]
-    fn test_rewrite_pak() {
-        use std::io::Cursor;
+    fn test_rewrite_pak_v8b() {
         let bytes = include_bytes!("../tests/packs/pack_v8b.pak");
 
         let mut reader = super::PakReader::new_any(Cursor::new(bytes), None).unwrap();
@@ -407,6 +409,54 @@ mod test {
         }
 
         let out_bytes = pak_writer.write_index().unwrap().into_inner();
-        assert_eq!(bytes.to_vec(), out_bytes);
+        assert_eq!(bytes, &out_bytes[..]);
+    }
+
+    #[test]
+    fn test_rewrite_pak_v8a() {
+        let bytes = include_bytes!("../tests/packs/pack_v8a.pak");
+
+        let mut reader = super::PakReader::new_any(Cursor::new(bytes), None).unwrap();
+        let writer = Cursor::new(vec![]);
+        let mut pak_writer = super::PakWriter::new(
+            writer,
+            None,
+            super::Version::V8A,
+            reader.mount_point().to_owned(),
+        );
+
+        for path in reader.files() {
+            let data = reader.get(&path).unwrap();
+            pak_writer
+                .write_file(&path, &mut std::io::Cursor::new(data))
+                .unwrap();
+        }
+
+        let out_bytes = pak_writer.write_index().unwrap().into_inner();
+        assert_eq!(bytes, &out_bytes[..]);
+    }
+
+    #[test]
+    fn test_rewrite_pak_v9() {
+        let bytes = include_bytes!("../tests/packs/pack_v9.pak");
+
+        let mut reader = super::PakReader::new_any(Cursor::new(bytes), None).unwrap();
+        let writer = Cursor::new(vec![]);
+        let mut pak_writer = super::PakWriter::new(
+            writer,
+            None,
+            super::Version::V9,
+            reader.mount_point().to_owned(),
+        );
+
+        for path in reader.files() {
+            let data = reader.get(&path).unwrap();
+            pak_writer
+                .write_file(&path, &mut std::io::Cursor::new(data))
+                .unwrap();
+        }
+
+        let out_bytes = pak_writer.write_index().unwrap().into_inner();
+        assert_eq!(bytes, &out_bytes[..]);
     }
 }
