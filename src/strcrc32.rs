@@ -49,11 +49,13 @@ fn strcrc32(data: &[u8]) -> u32 {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]
     fn test_strcrc32() {
+        // The full path to the pak file is fed to strcrc32() in order to generate `PathHashSeed`
+        // for the Index.
         let s = b"/home/jieyouxu/repos/unpak/tests/packs/pack_v11.pak";
         let expected_checksum = u32::from_le_bytes([0x81, 0x90, 0x5A, 0x28]);
         let actual_checksum = strcrc32(s);
