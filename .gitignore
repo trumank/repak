@@ -1,3 +1,4 @@
 *target/
 *.lock
 /tests/config.sh
+/tests/input.txt
