@@ -4,6 +4,7 @@ mod error;
 mod ext;
 mod footer;
 mod pak;
+mod strcrc32;
 
 pub use {error::*, pak::*};
 
