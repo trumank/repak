@@ -1,0 +1,18 @@
+[package]
+name = "repak_cli"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "repak"
+path = "src/main.rs"
+
+[dependencies]
+aes = { workspace = true }
+base64 = { workspace = true }
+clap = { version = "4.1.4", features = ["derive"] }
+path-clean = "0.1.0"
+repak = { version = "0.1.0", path = "../repak" }

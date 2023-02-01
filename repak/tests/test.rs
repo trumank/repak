@@ -111,16 +111,16 @@ macro_rules! encryptindex {
                     let key = general_purpose::STANDARD
                                 .decode(AES_KEY)
                                 .as_ref()
-                                .map_err(|_| unpak::Error::Base64)
+                                .map_err(|_| repak::Error::Base64)
                                 .and_then(|bytes| {
-                                    aes::Aes256Dec::new_from_slice(bytes).map_err(|_| unpak::Error::Aes)
+                                    aes::Aes256Dec::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
                                 }).unwrap();
 
 
                     let mut inner_reader = std::io::Cursor::new(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
                     let len = inner_reader.seek(SeekFrom::End(0)).unwrap();
 
-                    let mut pak = unpak::PakReader::new_any(
+                    let mut pak = repak::PakReader::new_any(
                         ReadCounter::new_size(inner_reader, len as usize),
                         Some(key),
                     ).unwrap();
@@ -158,12 +158,12 @@ macro_rules! encryptindex {
 
 matrix_test!(
     (
-        "v5" unpak::Version::V5,
-        "v7" unpak::Version::V7,
-        "v8a" unpak::Version::V8A,
-        "v8b" unpak::Version::V8B,
-        "v9" unpak::Version::V9,
-        "v11" unpak::Version::V11,
+        "v5" repak::Version::V5,
+        "v7" repak::Version::V7,
+        "v8a" repak::Version::V8A,
+        "v8b" repak::Version::V8B,
+        "v9" repak::Version::V9,
+        "v11" repak::Version::V11,
     ),
     ("", "_compress"),
     ("", "_encrypt"),

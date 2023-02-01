@@ -1,19 +1,24 @@
-# unpak
-## a no-nonsense unreal pak parser
-- doesn't force files to be extracted
-- only converts entries to bytes when requested
-- supports up to frozen index (4.25) paks (planned support for higher)
-- supports compressed and encrypted paks
-- supports iteration over entries
-## [click for example code](https://github.com/bananaturtlesandwich/unpak/blob/master/examples/unpak.rs)
-## the problem
-looking at the libraries for pak reading, they were never not quite right for what i wanted to do:
-- [rust-u4pak](https://github.com/panzi/rust-u4pak) - excellent support but very limited api
-- [ue4pak](https://github.com/Speedy37/ue4pak-rs) - excellent api but no support for extraction
-- [unrealpak](https://github.com/AstroTechies/unrealmodding/tree/main/unreal_pak) - excellent api but only supports version 8
-- [rust-unreal-unpak](https://crates.io/crates/rust-unreal-unpak) - is async only supports version 10
+# repak
 
-so i just though *fuck it i'll do it myself* and did it myself
+fork of https://github.com/bananaturtlesandwich/unpak
 
-## references
-although the api of [rust-u4pak](https://github.com/panzi/rust-u4pak) wasn't very friendly, the [`README`](https://github.com/panzi/rust-u4pak#readme) went into beautiful detail into the intricacies of the file format and when the readme had incorrect info *cough cough* `encryption uuid` *cough cough* the source code also had the answers as long as you looked hard enough
+## compatibility
+
+| UE Version | Version | Version Feature       | Read               | Write              |
+|------------|---------|-----------------------|--------------------|--------------------|
+|            | 1       | Initial               | :grey_question:    | :x:                |
+| 4.0-4.2    | 2       | NoTimestamps          | :heavy_check_mark: | :x:                |
+| 4.3-4.15   | 3       | CompressionEncryption | :heavy_check_mark: | :x:                |
+| 4.16-4.19  | 4       | IndexEncryption       | :heavy_check_mark: | :x:                |
+| 4.20       | 5       | RelativeChunkOffsets  | :heavy_check_mark: | :x:                |
+|            | 6       | DeleteRecords         | :grey_question:    | :x:                |
+| 4.21       | 7       | EncryptionKeyGuid     | :heavy_check_mark: | :x:                |
+| 4.22       | 8A      | FNameBasedCompression | :heavy_check_mark: | :x:                |
+| 4.23-4.24  | 8B      | FNameBasedCompression | :heavy_check_mark: | :heavy_check_mark: |
+| 4.25       | 9       | FrozenIndex           | :heavy_check_mark: | :x:                |
+|            | 10      | PathHashIndex         | :grey_question:    | :x:                |
+| 4.26-4.27  | 11      | Fnv64BugFix           | :heavy_check_mark: | :x:                |
+
+Supports reading encrypted (both index and/or data) and compressed paks.
+Writing is still a work in progress, but is functional enough for most recent
+Unreal Engine versions.

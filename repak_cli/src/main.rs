@@ -88,7 +88,7 @@ struct Args {
     action: Action,
 }
 
-fn main() -> Result<(), unpak::Error> {
+fn main() -> Result<(), repak::Error> {
     let args = Args::parse();
 
     match args.action {
@@ -99,18 +99,18 @@ fn main() -> Result<(), unpak::Error> {
     }
 }
 
-fn aes_key(key: &str) -> Result<aes::Aes256Dec, unpak::Error> {
+fn aes_key(key: &str) -> Result<aes::Aes256Dec, repak::Error> {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
     general_purpose::STANDARD
         .decode(key)
         .as_ref()
-        .map_err(|_| unpak::Error::Base64)
-        .and_then(|bytes| aes::Aes256Dec::new_from_slice(bytes).map_err(|_| unpak::Error::Aes))
+        .map_err(|_| repak::Error::Base64)
+        .and_then(|bytes| aes::Aes256Dec::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
 }
 
-fn info(args: ActionInfo) -> Result<(), unpak::Error> {
-    let pak = unpak::PakReader::new_any(
+fn info(args: ActionInfo) -> Result<(), repak::Error> {
+    let pak = repak::PakReader::new_any(
         BufReader::new(File::open(&args.input)?),
         args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
     )?;
@@ -121,8 +121,8 @@ fn info(args: ActionInfo) -> Result<(), unpak::Error> {
     Ok(())
 }
 
-fn list(args: ActionInfo) -> Result<(), unpak::Error> {
-    let pak = unpak::PakReader::new_any(
+fn list(args: ActionInfo) -> Result<(), repak::Error> {
+    let pak = repak::PakReader::new_any(
         BufReader::new(File::open(&args.input)?),
         args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
     )?;
@@ -132,8 +132,8 @@ fn list(args: ActionInfo) -> Result<(), unpak::Error> {
     Ok(())
 }
 
-fn unpack(args: ActionUnpack) -> Result<(), unpak::Error> {
-    let mut pak = unpak::PakReader::new_any(
+fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
+    let mut pak = repak::PakReader::new_any(
         BufReader::new(File::open(&args.input)?),
         args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
     )?;
@@ -147,7 +147,7 @@ fn unpack(args: ActionUnpack) -> Result<(), unpak::Error> {
         Err(e) => Err(e),
     }?;
     if output.read_dir()?.next().is_some() {
-        return Err(unpak::Error::Other("output directory not empty"));
+        return Err(repak::Error::Other("output directory not empty"));
     }
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
@@ -159,10 +159,10 @@ fn unpack(args: ActionUnpack) -> Result<(), unpak::Error> {
             mount_point
                 .join(&file)
                 .strip_prefix(prefix)
-                .map_err(|_| unpak::Error::Other("prefix does not match"))?,
+                .map_err(|_| repak::Error::Other("prefix does not match"))?,
         );
         if !file_path.clean().starts_with(&output) {
-            return Err(unpak::Error::Other(
+            return Err(repak::Error::Other(
                 "tried to write file outside of output directory",
             ));
         }
@@ -172,7 +172,7 @@ fn unpack(args: ActionUnpack) -> Result<(), unpak::Error> {
     Ok(())
 }
 
-fn pack(args: ActionPack) -> Result<(), unpak::Error> {
+fn pack(args: ActionPack) -> Result<(), repak::Error> {
     let output = args
         .output
         .map(PathBuf::from)
@@ -192,16 +192,16 @@ fn pack(args: ActionPack) -> Result<(), unpak::Error> {
     }
     let input_path = Path::new(&args.input);
     if !input_path.is_dir() {
-        return Err(unpak::Error::Other("input is not a directory"));
+        return Err(repak::Error::Other("input is not a directory"));
     }
     let mut paths = vec![];
     collect_files(&mut paths, input_path)?;
     paths.sort();
 
-    let mut pak = unpak::PakWriter::new(
+    let mut pak = repak::PakWriter::new(
         BufWriter::new(File::create(output)?),
         None,
-        unpak::Version::V8B,
+        repak::Version::V8B,
         args.mount_point,
     );
 
