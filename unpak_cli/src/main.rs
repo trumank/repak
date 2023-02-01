@@ -213,7 +213,7 @@ fn pack(args: ActionPack) -> Result<(), unpak::Error> {
         if args.verbose {
             println!("packing {}", &rel);
         }
-        pak.write_file(&rel, &mut BufReader::new(File::open(&p)?))?;
+        pak.write_file(rel, &mut BufReader::new(File::open(&p)?))?;
     }
 
     pak.write_index()?;
