@@ -44,6 +44,10 @@ struct ActionUnpack {
     /// Base64 encoded AES encryption key if the pak is encrypted
     #[arg(short, long)]
     aes_key: Option<String>,
+
+    /// Verbose
+    #[arg(short, long, default_value = "false")]
+    verbose: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -59,6 +63,10 @@ struct ActionPack {
     /// Mount point
     #[arg(short, long, default_value = "../../../")]
     mount_point: String,
+
+    /// Verbose
+    #[arg(short, long, default_value = "false")]
+    verbose: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -148,6 +156,9 @@ fn unpack(args: ActionUnpack) -> Result<(), unpak::Error> {
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
     for file in pak.files() {
+        if args.verbose {
+            println!("extracting {}", &file);
+        }
         let file_path = output.join(
             mount_point
                 .join(&file)
@@ -198,12 +209,14 @@ fn pack(args: ActionPack) -> Result<(), unpak::Error> {
     );
 
     for p in paths {
-        pak.write_file(
-            &p.strip_prefix(input_path)
-                .expect("file not in input directory")
-                .to_string_lossy(),
-            &mut BufReader::new(File::open(&p)?),
-        )?;
+        let rel = &p
+            .strip_prefix(input_path)
+            .expect("file not in input directory")
+            .to_string_lossy();
+        if args.verbose {
+            println!("packing {}", &rel);
+        }
+        pak.write_file(&rel, &mut BufReader::new(File::open(&p)?))?;
     }
 
     pak.write_index()?;
