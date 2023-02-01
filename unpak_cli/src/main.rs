@@ -179,20 +179,21 @@ fn pack(args: ActionPack) -> Result<(), unpak::Error> {
         .unwrap_or_else(|| Path::new(&args.input).with_extension("pak"));
 
     fn collect_files(paths: &mut Vec<PathBuf>, dir: &Path) -> io::Result<()> {
-        if dir.is_dir() {
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_dir() {
-                    collect_files(paths, &path)?;
-                } else {
-                    paths.push(entry.path());
-                }
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                collect_files(paths, &path)?;
+            } else {
+                paths.push(entry.path());
             }
         }
         Ok(())
     }
     let input_path = Path::new(&args.input);
+    if !input_path.is_dir() {
+        return Err(unpak::Error::Other("input is not a directory"));
+    }
     let mut paths = vec![];
     collect_files(&mut paths, input_path)?;
     paths.sort();
