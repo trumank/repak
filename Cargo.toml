@@ -16,3 +16,7 @@ aes = "0.8"
 flate2 = "1.0"
 thiserror = "1.0"
 sha1 = "0.10.5"
+
+[dev-dependencies]
+base64 = "0.21.0"
+paste = "1.0.11"
