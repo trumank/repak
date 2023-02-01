@@ -137,15 +137,11 @@ fn unpack(args: ActionUnpack) -> Result<(), unpak::Error> {
         BufReader::new(File::open(&args.input)?),
         args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
     )?;
-    let output = args.output.as_ref().map(Path::new).unwrap_or_else(|| {
-        Path::new(
-            Path::new(&args.input)
-                .file_stem()
-                .and_then(|name| name.to_str())
-                .expect("could not get pak file name"),
-        )
-    });
-    match fs::create_dir(output) {
+    let output = args
+        .output
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(&args.input).with_extension(""));
+    match fs::create_dir(&output) {
         Ok(_) => Ok(()),
         Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(e),
@@ -165,7 +161,7 @@ fn unpack(args: ActionUnpack) -> Result<(), unpak::Error> {
                 .strip_prefix(prefix)
                 .map_err(|_| unpak::Error::Other("prefix does not match"))?,
         );
-        if !file_path.clean().starts_with(output) {
+        if !file_path.clean().starts_with(&output) {
             return Err(unpak::Error::Other(
                 "tried to write file outside of output directory",
             ));
