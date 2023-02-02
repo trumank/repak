@@ -78,33 +78,6 @@ impl Entry {
         size
     }
 
-    pub fn get_index_encoded_entry_serialized_size(&self) -> u64 {
-        let mut size = 0;
-
-        size += 4; // flags
-        size += if self.offset > u32::MAX as u64 { 8 } else { 4 }; // offset
-        size += if self.uncompressed > u32::MAX as u64 {
-            8
-        } else {
-            4
-        };
-        if self.compression != Compression::None {
-            size += if self.compressed > u32::MAX as u64 {
-                8
-            } else {
-                4
-            }
-        }
-
-        if let Some(blocks) = &self.blocks {
-            if blocks.len() > 0 && (self.encrypted || blocks.len() == 1) {
-                size += 4 * blocks.len() as u64;
-            }
-        }
-
-        size
-    }
-
     pub fn read<R: io::Read>(
         reader: &mut R,
         version: super::Version,
@@ -146,7 +119,7 @@ impl Entry {
             },
         })
     }
-    
+
     pub fn write<W: io::Write>(
         &self,
         writer: &mut W,
@@ -160,7 +133,6 @@ impl Entry {
             } else {
                 0
             };
-            let compression_method = self.compression as u32;
             let is_size_32_bit_safe = self.compressed <= u32::MAX as u64;
             let is_uncompressed_size_32_bit_safe = self.uncompressed <= u32::MAX as u64;
             let is_offset_32_bit_safe = self.offset <= u32::MAX as u64;
@@ -168,7 +140,7 @@ impl Entry {
             let flags = (compression_block_size)
                 | (compression_blocks_count << 6)
                 | ((self.encrypted as u32) << 22)
-                | ((compression_method as u32) << 23)
+                | ((self.compression as u32) << 23)
                 | ((is_size_32_bit_safe as u32) << 29)
                 | ((is_uncompressed_size_32_bit_safe as u32) << 30)
                 | ((is_offset_32_bit_safe as u32) << 31);

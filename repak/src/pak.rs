@@ -4,7 +4,6 @@ use aes::Aes256Enc;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
-use std::path::Path;
 
 #[derive(Debug)]
 pub struct PakReader<R: Read + Seek> {
@@ -432,7 +431,7 @@ impl Pak {
                 let encoded_entries_size = index.entries.len() as u32 * ENCODED_ENTRY_SIZE;
                 index_writer.write_u32::<LE>(encoded_entries_size)?;
 
-                for (_, entry) in &index.entries {
+                for entry in index.entries.values() {
                     entry.write(
                         &mut index_writer,
                         self.version,
@@ -494,21 +493,11 @@ fn generate_path_hash_index<W: Write>(
 ) -> Result<(), super::Error> {
     writer.write_u32::<LE>(entries.len() as u32)?;
     let mut offset = 0u32;
-    for (path, _) in entries.iter() {
-        let utf16le_path;
-        #[cfg(unix)]
-        {
-            utf16le_path = convert_unix_path_to_utf16le_bytes(path);
-        }
-
-        #[cfg(windows)]
-        {
-            utf16le_path = utf16le_path_to_bytes(p);
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        unimplemented!("unsupported platform");
-
+    for path in entries.keys() {
+        let utf16le_path = path
+            .encode_utf16()
+            .flat_map(|c| c.to_le_bytes())
+            .collect::<Vec<_>>();
         let path_hash = fnv64(&utf16le_path, path_hash_seed);
         writer.write_u64::<LE>(path_hash)?;
         writer.write_u32::<LE>(offset)?;
@@ -518,43 +507,6 @@ fn generate_path_hash_index<W: Write>(
     writer.write_u32::<LE>(0)?;
 
     Ok(())
-}
-
-#[cfg(unix)]
-fn convert_unix_path_to_utf16le_bytes<P: AsRef<Path>>(path: P) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt;
-    path.as_ref()
-        .as_os_str()
-        .as_bytes()
-        .iter()
-        .flat_map(|&b| [b, 0])
-        .collect()
-}
-
-#[cfg(unix)]
-fn utf16le_path_to_bytes<P: AsRef<Path>>(path: P) -> Result<Vec<u8>, super::Error> {
-    Ok(path
-        .as_ref()
-        .to_path_buf()
-        .into_os_string()
-        .into_string()
-        .map_err(super::Error::OsString)?
-        .as_bytes()
-        .to_owned())
-}
-
-#[cfg(windows)]
-fn utf16le_path_to_bytes<P: AsRef<Path>>(path: P) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt;
-    let path: Vec<u16> = path.as_ref().as_os_str().encode_wide();
-    let mut buf = Vec::with_capacity(path.len() / 2);
-    LittleEndian::write_u16_into(&path, &mut buf);
-    buf
-}
-
-#[cfg(not(any(unix, windows)))]
-fn utf16le_path_to_bytes<P: AsRef<Path>>(path: P) -> Vec<u8> {
-    unimplemented!("unsupported platform")
 }
 
 fn fnv64(data: &[u8], offset: u64) -> u64 {
@@ -574,9 +526,9 @@ fn generate_full_directory_index<W: Write>(
 ) -> Result<(), super::Error> {
     let mut offset = 0u32;
     let mut fdi = BTreeMap::new();
-    for (path, _) in entries {
+    for path in entries.keys() {
         let (directory, filename) = {
-            let i = path.rfind("/").map(|i| i + 1); // we want to include the slash on the directory
+            let i = path.rfind('/').map(|i| i + 1); // we want to include the slash on the directory
             match i {
                 Some(i) => {
                     let (l, r) = path.split_at(i);
@@ -599,11 +551,9 @@ fn generate_full_directory_index<W: Write>(
         offset += ENCODED_ENTRY_SIZE;
     }
 
-    dbg!(&fdi);
-
     writer.write_u32::<LE>(fdi.len() as u32)?;
     for (directory, files) in &fdi {
-        writer.write_string(&directory)?;
+        writer.write_string(directory)?;
         writer.write_u32::<LE>(files.len() as u32)?;
         for (filename, offset) in files {
             writer.write_string(filename)?;
@@ -631,7 +581,7 @@ fn encrypt(key: Aes256Enc, bytes: &mut [u8]) {
 
 #[cfg(test)]
 mod test {
-    use crate::IndexV2;
+    use super::IndexV2;
 
     #[test]
     fn test_rewrite_pak_v8b() {
@@ -693,8 +643,6 @@ mod test {
         };
 
         let out_bytes = pak_writer.write_index().unwrap().into_inner();
-
-        std::fs::write("../target/test_v11.pak", &out_bytes).unwrap();
 
         assert_eq!(&bytes[..], &out_bytes[..]);
     }
