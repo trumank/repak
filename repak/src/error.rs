@@ -28,6 +28,8 @@ pub enum Error {
     },
     #[error("pak is encrypted but no key was provided")]
     Encrypted,
+    #[error("error with OsString")]
+    OsString(std::ffi::OsString),
     #[error("{0}")]
     Other(&'static str),
 }
