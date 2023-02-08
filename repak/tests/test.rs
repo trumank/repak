@@ -82,30 +82,30 @@ mod test {
 
 static AES_KEY: &str = "lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=";
 
-macro_rules! matrix_test {
+macro_rules! matrix_test_read {
     ( ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt ) => {
-        $( compress!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+        $( mt_compress_read!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
     };
 }
 
-macro_rules! compress {
+macro_rules! mt_compress_read {
     ( $version:literal, $exp_version:expr, ($($compress:literal),* $(,)?), $encrypt:tt, $encryptindex:tt ) => {
-        $( encrypt!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+        $( mt_encrypt_read!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
     };
 }
 
-macro_rules! encrypt {
+macro_rules! mt_encrypt_read {
     ( $version:literal, $exp_version:expr, $compress:literal, ($($encrypt:literal),* $(,)?), $encryptindex:tt ) => {
-        $( encryptindex!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+        $( mt_encryptindex_read!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
     };
 }
 
-macro_rules! encryptindex {
+macro_rules! mt_encryptindex_read {
     ( $version:literal, $exp_version:expr, $compress:literal, $encrypt:literal, ($($encryptindex:literal),* $(,)?) ) => {
         $(
             paste! {
                 #[test]
-                fn [< test_version_ $version $compress $encrypt $encryptindex >]() {
+                fn [< test_read_version_ $version $compress $encrypt $encryptindex >]() {
                     use aes::cipher::KeyInit;
                     use base64::{engine::general_purpose, Engine as _};
                     let key = general_purpose::STANDARD
@@ -154,7 +154,7 @@ macro_rules! encryptindex {
     };
 }
 
-matrix_test!(
+matrix_test_read!(
     (
         "v5" repak::Version::V5,
         "v7" repak::Version::V7,
@@ -166,4 +166,78 @@ matrix_test!(
     ("", "_compress"),
     ("", "_encrypt"),
     ("", "_encryptindex")
+);
+
+macro_rules! matrix_test_write {
+    ( ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt ) => {
+        $( mt_compress_write!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+    };
+}
+
+macro_rules! mt_compress_write {
+    ( $version:literal, $exp_version:expr, ($($compress:literal),* $(,)?), $encrypt:tt, $encryptindex:tt ) => {
+        $( mt_encrypt_write!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+    };
+}
+
+macro_rules! mt_encrypt_write {
+    ( $version:literal, $exp_version:expr, $compress:literal, ($($encrypt:literal),* $(,)?), $encryptindex:tt ) => {
+        $( mt_encryptindex_write!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+    };
+}
+
+macro_rules! mt_encryptindex_write {
+    ( $version:literal, $exp_version:expr, $compress:literal, $encrypt:literal, ($($encryptindex:literal),* $(,)?) ) => {
+        $(
+            paste! {
+                #[test]
+                fn [< test_write_version_ $version $compress $encrypt $encryptindex >]() {
+                    use aes::cipher::KeyInit;
+                    use base64::{engine::general_purpose, Engine as _};
+                    let key = general_purpose::STANDARD
+                                .decode(AES_KEY)
+                                .as_ref()
+                                .map_err(|_| repak::Error::Base64)
+                                .and_then(|bytes| {
+                                    aes::Aes256Dec::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
+                                }).unwrap();
+
+                    let mut reader = std::io::Cursor::new(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
+                    let pak_reader = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
+
+                    let writer = Cursor::new(vec![]);
+                    let mut pak_writer = repak::PakWriter::new(
+                        writer,
+                        None,
+                        pak_reader.version(),
+                        pak_reader.mount_point().to_owned(),
+                        Some(0x205C5A7D),
+                    );
+
+                    for path in pak_reader.files() {
+                        let data = pak_reader.get(&path, &mut reader).unwrap();
+                        pak_writer
+                            .write_file(&path, &mut std::io::Cursor::new(data))
+                            .unwrap();
+                    }
+
+                    assert_eq!(pak_writer.write_index().unwrap().into_inner(), reader.into_inner());
+                }
+            }
+        )*
+    };
+}
+
+matrix_test_write!(
+    (
+        "v5" repak::Version::V5,
+        "v7" repak::Version::V7,
+        "v8a" repak::Version::V8A,
+        "v8b" repak::Version::V8B,
+        "v9" repak::Version::V9,
+        "v11" repak::Version::V11,
+    ),
+    ("", /*"_compress"*/),
+    ("", /*"_encrypt"*/),
+    ("", /*"_encryptindex"*/)
 );
