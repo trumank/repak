@@ -81,6 +81,9 @@ impl Footer {
         writer.write_u64::<LE>(self.index_offset)?;
         writer.write_u64::<LE>(self.index_size)?;
         writer.write_all(&self.hash)?;
+        if self.version_major == VersionMajor::FrozenIndex {
+            writer.write_bool(self.frozen)?;
+        }
         let algo_size = match self.version {
             ver if ver < Version::V8A => 0,
             ver if ver < Version::V8B => 4,
