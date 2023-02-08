@@ -17,3 +17,4 @@ clap = { version = "4.1.4", features = ["derive"] }
 path-clean = "0.1.0"
 rayon = "1.6.1"
 repak = { version = "0.1.0", path = "../repak" }
+strum = { workspace = true }

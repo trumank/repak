@@ -26,61 +26,40 @@ pub struct Pak {
 }
 
 impl Pak {
-    fn new(version: Version, mount_point: String) -> Self {
+    fn new(version: Version, mount_point: String, path_hash_seed: Option<u64>) -> Self {
         Pak {
             version,
             mount_point,
-            index: Index::new(version),
+            index: Index::new(path_hash_seed),
         }
     }
 }
 
-#[derive(Debug)]
-pub enum Index {
-    V1(IndexV1),
-    V2(IndexV2),
+#[derive(Debug, Default)]
+pub struct Index {
+    path_hash_seed: Option<u64>,
+    entries: BTreeMap<String, super::entry::Entry>,
 }
 
 impl Index {
-    fn new(version: Version) -> Self {
-        if version < Version::V10 {
-            Self::V1(IndexV1::default())
-        } else {
-            Self::V2(IndexV2::default())
+    fn new(path_hash_seed: Option<u64>) -> Self {
+        Index {
+            path_hash_seed,
+            ..Index::default()
         }
     }
 
     fn entries(&self) -> &BTreeMap<String, super::entry::Entry> {
-        match self {
-            Index::V1(index) => &index.entries,
-            Index::V2(index) => &index.entries,
-        }
+        &self.entries
     }
 
     fn into_entries(self) -> BTreeMap<String, super::entry::Entry> {
-        match self {
-            Index::V1(index) => index.entries,
-            Index::V2(index) => index.entries,
-        }
+        self.entries
     }
 
     fn add_entry(&mut self, path: &str, entry: super::entry::Entry) {
-        match self {
-            Index::V1(index) => index.entries.insert(path.to_string(), entry),
-            Index::V2(index) => index.entries.insert(path.to_string(), entry),
-        };
+        self.entries.insert(path.to_string(), entry);
     }
-}
-
-#[derive(Debug, Default)]
-pub struct IndexV1 {
-    entries: BTreeMap<String, super::entry::Entry>,
-}
-
-#[derive(Debug, Default)]
-pub struct IndexV2 {
-    path_hash_seed: u64,
-    entries: BTreeMap<String, super::entry::Entry>,
 }
 
 fn decrypt(key: &Option<aes::Aes256Dec>, bytes: &mut [u8]) -> Result<(), super::Error> {
@@ -152,9 +131,10 @@ impl<W: Write + io::Seek> PakWriter<W> {
         key: Option<aes::Aes256Enc>,
         version: Version,
         mount_point: String,
+        path_hash_seed: Option<u64>,
     ) -> Self {
         PakWriter {
-            pak: Pak::new(version, mount_point),
+            pak: Pak::new(version, mount_point, path_hash_seed),
             writer,
             key,
         }
@@ -312,10 +292,10 @@ impl Pak {
 
             assert_eq!(index.read_u32::<LE>()?, 0, "remaining index bytes are 0"); // TODO possibly remaining unencoded entries?
 
-            Index::V2(IndexV2 {
-                path_hash_seed,
+            Index {
+                path_hash_seed: Some(path_hash_seed),
                 entries: entries_by_path,
-            })
+            }
         } else {
             let mut entries = BTreeMap::new();
             for _ in 0..len {
@@ -324,7 +304,10 @@ impl Pak {
                     super::entry::Entry::read(&mut index, version)?,
                 );
             }
-            Index::V1(IndexV1 { entries })
+            Index {
+                path_hash_seed: None,
+                entries,
+            }
         };
 
         Ok(Pak {
@@ -345,103 +328,101 @@ impl Pak {
         let mut index_writer = io::Cursor::new(&mut index_buf);
         index_writer.write_string(&self.mount_point)?;
 
-        let secondary_index = match &self.index {
-            Index::V1(index) => {
-                let record_count = index.entries.len() as u32;
-                index_writer.write_u32::<LE>(record_count)?;
-                for (path, entry) in &index.entries {
-                    index_writer.write_string(path)?;
-                    entry.write(
-                        &mut index_writer,
-                        self.version,
-                        super::entry::EntryLocation::Index,
-                    )?;
-                }
-                None
+        let secondary_index = if self.version < super::Version::V10 {
+            let record_count = self.index.entries.len() as u32;
+            index_writer.write_u32::<LE>(record_count)?;
+            for (path, entry) in &self.index.entries {
+                index_writer.write_string(path)?;
+                entry.write(
+                    &mut index_writer,
+                    self.version,
+                    super::entry::EntryLocation::Index,
+                )?;
             }
-            Index::V2(index) => {
-                let record_count = index.entries.len() as u32;
-                index_writer.write_u32::<LE>(record_count)?;
-                index_writer.write_u64::<LE>(index.path_hash_seed)?;
+            None
+        } else {
+            let record_count = self.index.entries.len() as u32;
+            let path_hash_seed = self.index.path_hash_seed.unwrap_or_default();
+            index_writer.write_u32::<LE>(record_count)?;
+            index_writer.write_u64::<LE>(path_hash_seed)?;
 
-                // The index is organized sequentially as:
-                // - Index Header, which contains:
-                //     - Mount Point (u32 len + string w/ terminating byte)
-                //     - Entry Count (u32)
-                //     - Path Hash Seed (u64)
-                //     - Has Path Hash Index (u32); if true, then:
-                //         - Path Hash Index Offset (u64)
-                //         - Path Hash Index Size (u64)
-                //         - Path Hash Index Hash ([u8; 20])
-                //     - Has Full Directory Index (u32); if true, then:
-                //         - Full Directory Index Offset (u64)
-                //         - Full Directory Index Size (u64)
-                //         - Full Directory Index Hash ([u8; 20])
-                //     - Encoded Index Records Size
-                //     - (Unused) File Count
-                // - Path Hash Index
-                // - Full Directory Index
-                // - Encoded Index Records; each encoded index record is (0xC bytes) from:
-                //     - Flags (u32)
-                //     - Offset (u32)
-                //     - Size (u32)
-                let bytes_before_phi = {
-                    let mut size = 0;
-                    size += 4; // mount point len
-                    size += self.mount_point.len() as u64 + 1; // mount point string w/ NUL byte
-                    size += 8; // path hash seed
-                    size += 4; // record count
-                    size += 4; // has path hash index (since we're generating, always true)
-                    size += 8 + 8 + 20; // path hash index offset, size and hash
-                    size += 4; // has full directory index (since we're generating, always true)
-                    size += 8 + 8 + 20; // full directory index offset, size and hash
-                    size += 4; // encoded entry size
-                    size += index.entries.len() as u64 * {
-                        4 // flags
+            // The index is organized sequentially as:
+            // - Index Header, which contains:
+            //     - Mount Point (u32 len + string w/ terminating byte)
+            //     - Entry Count (u32)
+            //     - Path Hash Seed (u64)
+            //     - Has Path Hash Index (u32); if true, then:
+            //         - Path Hash Index Offset (u64)
+            //         - Path Hash Index Size (u64)
+            //         - Path Hash Index Hash ([u8; 20])
+            //     - Has Full Directory Index (u32); if true, then:
+            //         - Full Directory Index Offset (u64)
+            //         - Full Directory Index Size (u64)
+            //         - Full Directory Index Hash ([u8; 20])
+            //     - Encoded Index Records Size
+            //     - (Unused) File Count
+            // - Path Hash Index
+            // - Full Directory Index
+            // - Encoded Index Records; each encoded index record is (0xC bytes) from:
+            //     - Flags (u32)
+            //     - Offset (u32)
+            //     - Size (u32)
+            let bytes_before_phi = {
+                let mut size = 0;
+                size += 4; // mount point len
+                size += self.mount_point.len() as u64 + 1; // mount point string w/ NUL byte
+                size += 8; // path hash seed
+                size += 4; // record count
+                size += 4; // has path hash index (since we're generating, always true)
+                size += 8 + 8 + 20; // path hash index offset, size and hash
+                size += 4; // has full directory index (since we're generating, always true)
+                size += 8 + 8 + 20; // full directory index offset, size and hash
+                size += 4; // encoded entry size
+                size += self.index.entries.len() as u64 * {
+                    4 // flags
                         + 4 // offset
                         + 4 // size
-                    };
-                    size += 4; // unused file count
-                    size
                 };
+                size += 4; // unused file count
+                size
+            };
 
-                let path_hash_index_offset = index_offset + bytes_before_phi;
+            let path_hash_index_offset = index_offset + bytes_before_phi;
 
-                let mut phi_buf = vec![];
-                let mut phi_writer = io::Cursor::new(&mut phi_buf);
-                generate_path_hash_index(&mut phi_writer, index.path_hash_seed, &index.entries)?;
+            let mut phi_buf = vec![];
+            let mut phi_writer = io::Cursor::new(&mut phi_buf);
+            generate_path_hash_index(&mut phi_writer, path_hash_seed, &self.index.entries)?;
 
-                let full_directory_index_offset = path_hash_index_offset + phi_buf.len() as u64;
+            let full_directory_index_offset = path_hash_index_offset + phi_buf.len() as u64;
 
-                let mut fdi_buf = vec![];
-                let mut fdi_writer = io::Cursor::new(&mut fdi_buf);
-                generate_full_directory_index(&mut fdi_writer, &index.entries)?;
+            let mut fdi_buf = vec![];
+            let mut fdi_writer = io::Cursor::new(&mut fdi_buf);
+            generate_full_directory_index(&mut fdi_writer, &self.index.entries)?;
 
-                index_writer.write_u32::<LE>(1)?; // we have path hash index
-                index_writer.write_u64::<LE>(path_hash_index_offset)?;
-                index_writer.write_u64::<LE>(phi_buf.len() as u64)?; // path hash index size
-                index_writer.write_all(&hash(&phi_buf))?;
+            index_writer.write_u32::<LE>(1)?; // we have path hash index
+            index_writer.write_u64::<LE>(path_hash_index_offset)?;
+            index_writer.write_u64::<LE>(phi_buf.len() as u64)?; // path hash index size
+            index_writer.write_all(&hash(&phi_buf))?;
 
-                index_writer.write_u32::<LE>(1)?; // we have full directory index
-                index_writer.write_u64::<LE>(full_directory_index_offset)?;
-                index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // path hash index size
-                index_writer.write_all(&hash(&fdi_buf))?;
+            index_writer.write_u32::<LE>(1)?; // we have full directory index
+            index_writer.write_u64::<LE>(full_directory_index_offset)?;
+            index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // path hash index size
+            index_writer.write_all(&hash(&fdi_buf))?;
 
-                let encoded_entries_size = index.entries.len() as u32 * ENCODED_ENTRY_SIZE;
-                index_writer.write_u32::<LE>(encoded_entries_size)?;
+            let encoded_entries_size = self.index.entries.len() as u32 * ENCODED_ENTRY_SIZE;
+            index_writer.write_u32::<LE>(encoded_entries_size)?;
 
-                for entry in index.entries.values() {
-                    entry.write(
-                        &mut index_writer,
-                        self.version,
-                        super::entry::EntryLocation::Index,
-                    )?;
-                }
-
-                index_writer.write_u32::<LE>(0)?;
-
-                Some((phi_buf, fdi_buf))
+            for entry in self.index.entries.values() {
+                entry.write(
+                    &mut index_writer,
+                    self.version,
+                    super::entry::EntryLocation::Index,
+                )?;
             }
+
+            index_writer.write_u32::<LE>(0)?;
+
+            Some((phi_buf, fdi_buf))
         };
 
         let index_hash = hash(&index_buf);
@@ -580,8 +561,6 @@ fn encrypt(key: Aes256Enc, bytes: &mut [u8]) {
 
 #[cfg(test)]
 mod test {
-    use super::IndexV2;
-
     #[test]
     fn test_rewrite_pak_v8b() {
         use std::io::Cursor;
@@ -595,6 +574,7 @@ mod test {
             None,
             super::Version::V8B,
             pak_reader.mount_point().to_owned(),
+            None,
         );
 
         for path in pak_reader.files() {
@@ -621,6 +601,7 @@ mod test {
             None,
             super::Version::V11,
             pak_reader.mount_point().to_owned(),
+            Some(0x205C5A7D),
         );
 
         for path in pak_reader.files() {
@@ -629,19 +610,6 @@ mod test {
                 .write_file(&path, &mut std::io::Cursor::new(data))
                 .unwrap();
         }
-
-        // There's a caveat: UnrealPak uses the absolute path (in UTF-16LE) of the output pak
-        // passed to strcrc32() as the PathHashSeed. We don't want to require the user to do this.
-        if let super::Index::V2(index) = pak_writer.pak.index {
-            pak_writer.pak.index = super::Index::V2(IndexV2 {
-                path_hash_seed: u64::from_le_bytes([
-                    0x7D, 0x5A, 0x5C, 0x20, 0x00, 0x00, 0x00, 0x00,
-                ]),
-                ..index
-            });
-        } else {
-            panic!()
-        };
 
         let out_bytes = pak_writer.write_index().unwrap().into_inner();
 

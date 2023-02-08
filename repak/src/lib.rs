@@ -10,7 +10,17 @@ pub use {error::*, pak::*};
 pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Debug, strum::Display, strum::FromRepr, strum::EnumIter,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Debug,
+    strum::Display,
+    strum::FromRepr,
+    strum::EnumIter,
+    strum::EnumString,
+    strum::EnumVariantNames,
 )]
 pub enum Version {
     V0,

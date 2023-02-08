@@ -2,9 +2,11 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
+use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand};
 use path_clean::PathClean;
 use rayon::prelude::*;
+use strum::VariantNames;
 
 #[derive(Parser, Debug)]
 struct ActionInfo {
@@ -65,6 +67,18 @@ struct ActionPack {
     #[arg(short, long, default_value = "../../../")]
     mount_point: String,
 
+    /// Version
+    #[arg(
+        long,
+        default_value_t = repak::Version::V8B,
+        value_parser = clap::builder::PossibleValuesParser::new(repak::Version::VARIANTS).map(|s| s.parse::<repak::Version>().unwrap())
+    )]
+    version: repak::Version,
+
+    /// Path hash seed for >= V10
+    #[arg(short, long, default_value = "0")]
+    path_hash_seed: u64,
+
     /// Verbose
     #[arg(short, long, default_value = "false")]
     verbose: bool,
@@ -91,6 +105,9 @@ struct Args {
 
 fn main() -> Result<(), repak::Error> {
     let args = Args::parse();
+
+    //let aasdf = repak::Version::iter().map(|v| format!("{v}"));
+    //clap::builder::PossibleValuesParser::new(aasdf.map(|a| a.as_str()));
 
     match args.action {
         Action::Info(args) => info(args),
@@ -208,8 +225,9 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     let mut pak = repak::PakWriter::new(
         BufWriter::new(File::create(output)?),
         None,
-        repak::Version::V8B,
+        args.version,
         args.mount_point,
+        Some(args.path_hash_seed),
     );
 
     for p in paths {
