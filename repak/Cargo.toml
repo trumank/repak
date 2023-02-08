@@ -5,7 +5,6 @@ authors.workspace = true
 license.workspace = true
 version.workspace = true
 edition.workspace = true
-strum.workspace = true
 
 [dependencies]
 byteorder = "1.4"
