@@ -98,11 +98,7 @@ impl PakReader {
         &self.pak.mount_point
     }
 
-    pub fn get<R: Read + Seek>(
-        &mut self,
-        path: &str,
-        reader: &mut R,
-    ) -> Result<Vec<u8>, super::Error> {
+    pub fn get<R: Read + Seek>(&self, path: &str, reader: &mut R) -> Result<Vec<u8>, super::Error> {
         let mut data = Vec::new();
         self.read_file(path, reader, &mut data)?;
         Ok(data)
@@ -567,7 +563,7 @@ mod test {
         let bytes = include_bytes!("../tests/packs/pack_v8b.pak");
 
         let mut reader = Cursor::new(bytes);
-        let mut pak_reader = super::PakReader::new_any(&mut reader, None).unwrap();
+        let pak_reader = super::PakReader::new_any(&mut reader, None).unwrap();
         let writer = Cursor::new(vec![]);
         let mut pak_writer = super::PakWriter::new(
             writer,
@@ -594,7 +590,7 @@ mod test {
         let bytes = include_bytes!("../tests/packs/pack_v11.pak");
 
         let mut reader = Cursor::new(bytes);
-        let mut pak_reader = super::PakReader::new_any(&mut reader, None).unwrap();
+        let pak_reader = super::PakReader::new_any(&mut reader, None).unwrap();
         let writer = Cursor::new(vec![]);
         let mut pak_writer = super::PakWriter::new(
             writer,
