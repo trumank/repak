@@ -119,11 +119,9 @@ macro_rules! encryptindex {
 
                     let mut inner_reader = std::io::Cursor::new(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
                     let len = inner_reader.seek(SeekFrom::End(0)).unwrap();
+                    let mut reader = ReadCounter::new_size(inner_reader, len as usize);
 
-                    let mut pak = repak::PakReader::new_any(
-                        ReadCounter::new_size(inner_reader, len as usize),
-                        Some(key),
-                    ).unwrap();
+                    let pak = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
 
                     assert_eq!(pak.mount_point(), "../mount/point/root/");
                     assert_eq!(pak.version(), $exp_version);
@@ -134,7 +132,7 @@ macro_rules! encryptindex {
                     for file in files {
                         let mut buf = vec![];
                         let mut writer = std::io::Cursor::new(&mut buf);
-                        pak.read_file(&file, &mut writer).unwrap();
+                        pak.read_file(&file, &mut reader, &mut writer).unwrap();
                         match file.as_str() {
                             "test.txt" => assert_eq!(buf, include_bytes!("pack/root/test.txt"), "test.txt incorrect contents"),
                             "test.png" => assert_eq!(buf, include_bytes!("pack/root/test.png"), "test.png incorrect contents"),
@@ -144,7 +142,7 @@ macro_rules! encryptindex {
                         }
                     }
 
-                    for r in pak.into_reader().into_reads() {
+                    for r in reader.into_reads() {
                         // sanity check. a pak file can be constructed with a lot of dead space
                         // which wouldn't have to be read, but so far all bytes in paks generated
                         // by UnrealPak are meaningful

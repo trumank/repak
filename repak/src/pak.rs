@@ -6,9 +6,8 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
 
 #[derive(Debug)]
-pub struct PakReader<R: Read + Seek> {
+pub struct PakReader {
     pak: Pak,
-    reader: R,
     key: Option<aes::Aes256Dec>,
 }
 
@@ -58,6 +57,13 @@ impl Index {
         }
     }
 
+    fn into_entries(self) -> BTreeMap<String, super::entry::Entry> {
+        match self {
+            Index::V1(index) => index.entries,
+            Index::V2(index) => index.entries,
+        }
+    }
+
     fn add_entry(&mut self, path: &str, entry: super::entry::Entry) {
         match self {
             Index::V1(index) => index.entries.insert(path.to_string(), entry),
@@ -89,21 +95,20 @@ fn decrypt(key: &Option<aes::Aes256Dec>, bytes: &mut [u8]) -> Result<(), super::
     }
 }
 
-impl<R: Read + Seek> PakReader<R> {
-    pub fn new_any(mut reader: R, key: Option<aes::Aes256Dec>) -> Result<Self, super::Error> {
+impl PakReader {
+    pub fn new_any<R: Read + Seek>(
+        mut reader: R,
+        key: Option<aes::Aes256Dec>,
+    ) -> Result<Self, super::Error> {
         for ver in Version::iter() {
             match Pak::read(&mut reader, ver, key.clone()) {
                 Ok(pak) => {
-                    return Ok(PakReader { pak, reader, key });
+                    return Ok(PakReader { pak, key });
                 }
                 _ => continue,
             }
         }
         Err(super::Error::Other("version unsupported"))
-    }
-
-    pub fn into_reader(self) -> R {
-        self.reader
     }
 
     pub fn version(&self) -> super::Version {
@@ -114,36 +119,30 @@ impl<R: Read + Seek> PakReader<R> {
         &self.pak.mount_point
     }
 
-    pub fn get(&mut self, path: &str) -> Result<Vec<u8>, super::Error> {
+    pub fn get<R: Read + Seek>(
+        &mut self,
+        path: &str,
+        reader: &mut R,
+    ) -> Result<Vec<u8>, super::Error> {
         let mut data = Vec::new();
-        self.read_file(path, &mut data)?;
+        self.read_file(path, reader, &mut data)?;
         Ok(data)
     }
 
-    pub fn read_file<W: io::Write>(
-        &mut self,
+    pub fn read_file<R: Read + Seek, W: io::Write>(
+        &self,
         path: &str,
+        reader: &mut R,
         writer: &mut W,
     ) -> Result<(), super::Error> {
         match self.pak.index.entries().get(path) {
-            Some(entry) => entry.read_file(
-                &mut self.reader,
-                self.pak.version,
-                self.key.as_ref(),
-                writer,
-            ),
+            Some(entry) => entry.read_file(reader, self.pak.version, self.key.as_ref(), writer),
             None => Err(super::Error::Other("no file found at given path")),
         }
     }
 
-    pub fn files(&self) -> std::vec::IntoIter<String> {
-        self.pak
-            .index
-            .entries()
-            .keys()
-            .cloned()
-            .collect::<Vec<String>>()
-            .into_iter()
+    pub fn files(&self) -> Vec<String> {
+        self.pak.index.entries().keys().cloned().collect()
     }
 }
 
@@ -588,17 +587,18 @@ mod test {
         use std::io::Cursor;
         let bytes = include_bytes!("../tests/packs/pack_v8b.pak");
 
-        let mut reader = super::PakReader::new_any(Cursor::new(bytes), None).unwrap();
+        let mut reader = Cursor::new(bytes);
+        let mut pak_reader = super::PakReader::new_any(&mut reader, None).unwrap();
         let writer = Cursor::new(vec![]);
         let mut pak_writer = super::PakWriter::new(
             writer,
             None,
             super::Version::V8B,
-            reader.mount_point().to_owned(),
+            pak_reader.mount_point().to_owned(),
         );
 
-        for path in reader.files() {
-            let data = reader.get(&path).unwrap();
+        for path in pak_reader.files() {
+            let data = pak_reader.get(&path, &mut reader).unwrap();
             pak_writer
                 .write_file(&path, &mut std::io::Cursor::new(data))
                 .unwrap();
@@ -613,17 +613,18 @@ mod test {
         use std::io::Cursor;
         let bytes = include_bytes!("../tests/packs/pack_v11.pak");
 
-        let mut reader = super::PakReader::new_any(Cursor::new(bytes), None).unwrap();
+        let mut reader = Cursor::new(bytes);
+        let mut pak_reader = super::PakReader::new_any(&mut reader, None).unwrap();
         let writer = Cursor::new(vec![]);
         let mut pak_writer = super::PakWriter::new(
             writer,
             None,
             super::Version::V11,
-            reader.mount_point().to_owned(),
+            pak_reader.mount_point().to_owned(),
         );
 
-        for path in reader.files() {
-            let data = reader.get(&path).unwrap();
+        for path in pak_reader.files() {
+            let data = pak_reader.get(&path, &mut reader).unwrap();
             pak_writer
                 .write_file(&path, &mut std::io::Cursor::new(data))
                 .unwrap();

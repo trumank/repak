@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use path_clean::PathClean;
+use rayon::prelude::*;
 
 #[derive(Parser, Debug)]
 struct ActionInfo {
@@ -133,7 +134,7 @@ fn list(args: ActionInfo) -> Result<(), repak::Error> {
 }
 
 fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
-    let mut pak = repak::PakReader::new_any(
+    let pak = repak::PakReader::new_any(
         BufReader::new(File::open(&args.input)?),
         args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
     )?;
@@ -151,25 +152,31 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
     }
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
-    for file in pak.files() {
-        if args.verbose {
-            println!("extracting {}", &file);
-        }
-        let file_path = output.join(
-            mount_point
-                .join(&file)
-                .strip_prefix(prefix)
-                .map_err(|_| repak::Error::Other("prefix does not match"))?,
-        );
-        if !file_path.clean().starts_with(&output) {
-            return Err(repak::Error::Other(
-                "tried to write file outside of output directory",
-            ));
-        }
-        fs::create_dir_all(file_path.parent().expect("will be a file"))?;
-        pak.read_file(&file, &mut fs::File::create(file_path)?)?;
-    }
-    Ok(())
+    pak.files().into_par_iter().try_for_each_init(
+        || File::open(&args.input),
+        |file, path| -> Result<(), repak::Error> {
+            if args.verbose {
+                println!("extracting {path}");
+            }
+            let file_path = output.join(
+                mount_point
+                    .join(&path)
+                    .strip_prefix(prefix)
+                    .map_err(|_| repak::Error::Other("prefix does not match"))?,
+            );
+            if !file_path.clean().starts_with(&output) {
+                return Err(repak::Error::Other(
+                    "tried to write file outside of output directory",
+                ));
+            }
+            fs::create_dir_all(file_path.parent().expect("will be a file"))?;
+            pak.read_file(
+                &path,
+                &mut BufReader::new(file.as_ref().unwrap()), // TODO: avoid this unwrap
+                &mut fs::File::create(file_path)?,
+            )
+        },
+    )
 }
 
 fn pack(args: ActionPack) -> Result<(), repak::Error> {
