@@ -62,8 +62,8 @@ impl Footer {
         }
         if version.version_major() != footer.version_major {
             return Err(super::Error::Version {
-                used: version,
-                version: footer.version,
+                used: version.version_major(),
+                version: footer.version_major,
             });
         }
         Ok(footer)

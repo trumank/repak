@@ -23,8 +23,8 @@ pub enum Error {
     Magic(u32),
     #[error("used version {used} but pak is version {version}")]
     Version {
-        used: super::Version,
-        version: super::Version,
+        used: super::VersionMajor,
+        version: super::VersionMajor,
     },
     #[error("pak is encrypted but no key was provided")]
     Encrypted,
