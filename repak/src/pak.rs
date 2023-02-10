@@ -104,7 +104,7 @@ impl PakReader {
         Ok(data)
     }
 
-    pub fn read_file<R: Read + Seek, W: io::Write>(
+    pub fn read_file<R: Read + Seek, W: Write>(
         &self,
         path: &str,
         reader: &mut R,
@@ -121,7 +121,7 @@ impl PakReader {
     }
 }
 
-impl<W: Write + io::Seek> PakWriter<W> {
+impl<W: Write + Seek> PakWriter<W> {
     pub fn new(
         writer: W,
         key: Option<aes::Aes256>,
