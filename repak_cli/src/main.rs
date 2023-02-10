@@ -117,14 +117,14 @@ fn main() -> Result<(), repak::Error> {
     }
 }
 
-fn aes_key(key: &str) -> Result<aes::Aes256Dec, repak::Error> {
+fn aes_key(key: &str) -> Result<aes::Aes256, repak::Error> {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
     general_purpose::STANDARD
         .decode(key)
         .as_ref()
         .map_err(|_| repak::Error::Base64)
-        .and_then(|bytes| aes::Aes256Dec::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
+        .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
 }
 
 fn info(args: ActionInfo) -> Result<(), repak::Error> {

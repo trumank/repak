@@ -1,6 +1,6 @@
 use super::ext::{ReadExt, WriteExt};
 use super::{Version, VersionMajor};
-use aes::Aes256Enc;
+use aes::Aes256;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
@@ -8,14 +8,14 @@ use std::io::{self, Read, Seek, Write};
 #[derive(Debug)]
 pub struct PakReader {
     pak: Pak,
-    key: Option<aes::Aes256Dec>,
+    key: Option<aes::Aes256>,
 }
 
 #[derive(Debug)]
 pub struct PakWriter<W: Write + Seek> {
     pak: Pak,
     writer: W,
-    key: Option<aes::Aes256Enc>,
+    key: Option<aes::Aes256>,
 }
 
 #[derive(Debug)]
@@ -62,7 +62,7 @@ impl Index {
     }
 }
 
-fn decrypt(key: &Option<aes::Aes256Dec>, bytes: &mut [u8]) -> Result<(), super::Error> {
+fn decrypt(key: &Option<aes::Aes256>, bytes: &mut [u8]) -> Result<(), super::Error> {
     if let Some(key) = &key {
         use aes::cipher::BlockDecrypt;
         for chunk in bytes.chunks_mut(16) {
@@ -77,7 +77,7 @@ fn decrypt(key: &Option<aes::Aes256Dec>, bytes: &mut [u8]) -> Result<(), super::
 impl PakReader {
     pub fn new_any<R: Read + Seek>(
         mut reader: R,
-        key: Option<aes::Aes256Dec>,
+        key: Option<aes::Aes256>,
     ) -> Result<Self, super::Error> {
         for ver in Version::iter() {
             match Pak::read(&mut reader, ver, key.clone()) {
@@ -124,7 +124,7 @@ impl PakReader {
 impl<W: Write + io::Seek> PakWriter<W> {
     pub fn new(
         writer: W,
-        key: Option<aes::Aes256Enc>,
+        key: Option<aes::Aes256>,
         version: Version,
         mount_point: String,
         path_hash_seed: Option<u64>,
@@ -185,7 +185,7 @@ impl Pak {
     fn read<R: Read + Seek>(
         mut reader: R,
         version: super::Version,
-        key: Option<aes::Aes256Dec>,
+        key: Option<aes::Aes256>,
     ) -> Result<Self, super::Error> {
         // read footer to get index, encryption & compression info
         reader.seek(io::SeekFrom::End(-version.size()))?;
@@ -316,7 +316,7 @@ impl Pak {
     fn write<W: Write + Seek>(
         &self,
         writer: &mut W,
-        _key: Option<aes::Aes256Enc>,
+        _key: Option<aes::Aes256>,
     ) -> Result<(), super::Error> {
         let index_offset = writer.stream_position()?;
 
@@ -548,7 +548,7 @@ fn pad_zeros_to_alignment(v: &mut Vec<u8>, alignment: usize) {
     assert!(v.len() % alignment == 0);
 }
 
-fn encrypt(key: Aes256Enc, bytes: &mut [u8]) {
+fn encrypt(key: Aes256, bytes: &mut [u8]) {
     use aes::cipher::BlockEncrypt;
     for chunk in bytes.chunks_mut(16) {
         key.encrypt_block(aes::Block::from_mut_slice(chunk))

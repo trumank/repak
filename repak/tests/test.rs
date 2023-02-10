@@ -113,7 +113,7 @@ macro_rules! mt_encryptindex_read {
                                 .as_ref()
                                 .map_err(|_| repak::Error::Base64)
                                 .and_then(|bytes| {
-                                    aes::Aes256Dec::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
+                                    aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
                                 }).unwrap();
 
 
@@ -199,7 +199,7 @@ macro_rules! mt_encryptindex_write {
                                 .as_ref()
                                 .map_err(|_| repak::Error::Base64)
                                 .and_then(|bytes| {
-                                    aes::Aes256Dec::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
+                                    aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
                                 }).unwrap();
 
                     let mut reader = std::io::Cursor::new(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));

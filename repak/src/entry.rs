@@ -310,7 +310,7 @@ impl Entry {
         &self,
         reader: &mut R,
         version: Version,
-        key: Option<&aes::Aes256Dec>,
+        key: Option<&aes::Aes256>,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
