@@ -238,7 +238,7 @@ impl Pak {
 
                 let mut path_hash_index = vec![];
                 let mut phi_reader = io::Cursor::new(&mut path_hash_index_buf);
-                for _ in 0..len {
+                for _ in 0..phi_reader.read_u32::<LE>()? {
                     let hash = phi_reader.read_u64::<LE>()?;
                     let encoded_entry_offset = phi_reader.read_u32::<LE>()?;
                     path_hash_index.push((hash, encoded_entry_offset));
