@@ -490,6 +490,7 @@ fn generate_path_hash_index<W: Write>(
     writer.write_u32::<LE>(entries.len() as u32)?;
     for (path, offset) in entries.keys().zip(offsets) {
         let utf16le_path = path
+            .to_lowercase()
             .encode_utf16()
             .flat_map(|c| c.to_le_bytes())
             .collect::<Vec<_>>();
