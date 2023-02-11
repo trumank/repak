@@ -162,7 +162,7 @@ impl<W: Write + Seek> PakWriter<W> {
             hash: Some(hasher.finalize().into()),
             blocks: None,
             encrypted: false,
-            block_uncompressed: None,
+            compression_block_size: 0,
         };
 
         entry.write(
@@ -345,6 +345,20 @@ impl Pak {
             index_writer.write_u32::<LE>(record_count)?;
             index_writer.write_u64::<LE>(path_hash_seed)?;
 
+            let (encoded_entries, offsets) = {
+                let mut offsets = Vec::with_capacity(self.index.entries.len());
+                let mut encoded_entries = io::Cursor::new(vec![]);
+                for entry in self.index.entries.values() {
+                    offsets.push(encoded_entries.get_ref().len() as u32);
+                    entry.write(
+                        &mut encoded_entries,
+                        self.version,
+                        super::entry::EntryLocation::Index,
+                    )?;
+                }
+                (encoded_entries.into_inner(), offsets)
+            };
+
             // The index is organized sequentially as:
             // - Index Header, which contains:
             //     - Mount Point (u32 len + string w/ terminating byte)
@@ -377,11 +391,7 @@ impl Pak {
                 size += 4; // has full directory index (since we're generating, always true)
                 size += 8 + 8 + 20; // full directory index offset, size and hash
                 size += 4; // encoded entry size
-                size += self.index.entries.len() as u64 * {
-                    4 // flags
-                        + 4 // offset
-                        + 4 // size
-                };
+                size += encoded_entries.len() as u64;
                 size += 4; // unused file count
                 size
             };
@@ -390,13 +400,18 @@ impl Pak {
 
             let mut phi_buf = vec![];
             let mut phi_writer = io::Cursor::new(&mut phi_buf);
-            generate_path_hash_index(&mut phi_writer, path_hash_seed, &self.index.entries)?;
+            generate_path_hash_index(
+                &mut phi_writer,
+                path_hash_seed,
+                &self.index.entries,
+                &offsets,
+            )?;
 
             let full_directory_index_offset = path_hash_index_offset + phi_buf.len() as u64;
 
             let mut fdi_buf = vec![];
             let mut fdi_writer = io::Cursor::new(&mut fdi_buf);
-            generate_full_directory_index(&mut fdi_writer, &self.index.entries)?;
+            generate_full_directory_index(&mut fdi_writer, &self.index.entries, &offsets)?;
 
             index_writer.write_u32::<LE>(1)?; // we have path hash index
             index_writer.write_u64::<LE>(path_hash_index_offset)?;
@@ -408,16 +423,8 @@ impl Pak {
             index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // path hash index size
             index_writer.write_all(&hash(&fdi_buf))?;
 
-            let encoded_entries_size = self.index.entries.len() as u32 * ENCODED_ENTRY_SIZE;
-            index_writer.write_u32::<LE>(encoded_entries_size)?;
-
-            for entry in self.index.entries.values() {
-                entry.write(
-                    &mut index_writer,
-                    self.version,
-                    super::entry::EntryLocation::Index,
-                )?;
-            }
+            index_writer.write_u32::<LE>(encoded_entries.len() as u32)?;
+            index_writer.write_all(&encoded_entries)?;
 
             index_writer.write_u32::<LE>(0)?;
 
@@ -459,28 +466,21 @@ fn hash(data: &[u8]) -> [u8; 20] {
     hasher.finalize().into()
 }
 
-const ENCODED_ENTRY_SIZE: u32 = {
-    4 // flags
-    + 4 // offset
-    + 4 // size
-};
-
 fn generate_path_hash_index<W: Write>(
     writer: &mut W,
     path_hash_seed: u64,
     entries: &BTreeMap<String, super::entry::Entry>,
+    offsets: &Vec<u32>,
 ) -> Result<(), super::Error> {
     writer.write_u32::<LE>(entries.len() as u32)?;
-    let mut offset = 0u32;
-    for path in entries.keys() {
+    for (path, offset) in entries.keys().zip(offsets) {
         let utf16le_path = path
             .encode_utf16()
             .flat_map(|c| c.to_le_bytes())
             .collect::<Vec<_>>();
         let path_hash = fnv64(&utf16le_path, path_hash_seed);
         writer.write_u64::<LE>(path_hash)?;
-        writer.write_u32::<LE>(offset)?;
-        offset += ENCODED_ENTRY_SIZE;
+        writer.write_u32::<LE>(*offset as u32)?;
     }
 
     writer.write_u32::<LE>(0)?;
@@ -502,10 +502,10 @@ fn fnv64(data: &[u8], offset: u64) -> u64 {
 fn generate_full_directory_index<W: Write>(
     writer: &mut W,
     entries: &BTreeMap<String, super::entry::Entry>,
+    offsets: &Vec<u32>,
 ) -> Result<(), super::Error> {
-    let mut offset = 0u32;
     let mut fdi = BTreeMap::new();
-    for path in entries.keys() {
+    for (path, offset) in entries.keys().zip(offsets) {
         let (directory, filename) = {
             let i = path.rfind('/').map(|i| i + 1); // we want to include the slash on the directory
             match i {
@@ -519,15 +519,13 @@ fn generate_full_directory_index<W: Write>(
 
         fdi.entry(directory)
             .and_modify(|d: &mut BTreeMap<String, u32>| {
-                d.insert(filename.clone(), offset);
+                d.insert(filename.clone(), *offset);
             })
             .or_insert_with(|| {
                 let mut files_and_offsets = BTreeMap::new();
-                files_and_offsets.insert(filename.clone(), offset);
+                files_and_offsets.insert(filename.clone(), *offset);
                 files_and_offsets
             });
-
-        offset += ENCODED_ENTRY_SIZE;
     }
 
     writer.write_u32::<LE>(fdi.len() as u32)?;

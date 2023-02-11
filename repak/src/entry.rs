@@ -44,7 +44,7 @@ pub struct Entry {
     pub hash: Option<[u8; 20]>,
     pub blocks: Option<Vec<Block>>,
     pub encrypted: bool,
-    pub block_uncompressed: Option<u32>,
+    pub compression_block_size: u32,
 }
 
 impl Entry {
@@ -112,10 +112,11 @@ impl Entry {
             },
             encrypted: version.version_major() >= VersionMajor::CompressionEncryption
                 && reader.read_bool()?,
-            block_uncompressed: match version.version_major() >= VersionMajor::CompressionEncryption
+            compression_block_size: match version.version_major()
+                >= VersionMajor::CompressionEncryption
             {
-                true => Some(reader.read_u32::<LE>()?),
-                false => None,
+                true => reader.read_u32::<LE>()?,
+                false => 0,
             },
         })
     }
@@ -127,7 +128,10 @@ impl Entry {
         location: EntryLocation,
     ) -> Result<(), super::Error> {
         if version >= super::Version::V10 && location == EntryLocation::Index {
-            let compression_block_size = self.block_uncompressed.unwrap_or_default();
+            let mut compression_block_size = (self.compression_block_size >> 11) & 0x3f;
+            if (compression_block_size << 11) != self.compression_block_size {
+                compression_block_size = 0x3f;
+            }
             let compression_blocks_count = if self.compression != Compression::None {
                 self.blocks.as_ref().unwrap().len() as u32
             } else {
@@ -146,6 +150,10 @@ impl Entry {
                 | ((is_offset_32_bit_safe as u32) << 31);
 
             writer.write_u32::<LE>(flags)?;
+
+            if compression_block_size == 0x3f {
+                writer.write_u32::<LE>(self.compression_block_size)?;
+            }
 
             if is_offset_32_bit_safe {
                 writer.write_u32::<LE>(self.offset as u32)?;
@@ -168,7 +176,7 @@ impl Entry {
 
                 assert!(self.blocks.is_some());
                 let blocks = self.blocks.as_ref().unwrap();
-                if blocks.len() > 1 || (blocks.len() == 1 && self.encrypted) {
+                if blocks.len() > 1 && !(blocks.len() == 1 && !self.encrypted) {
                     for b in blocks {
                         let block_size = b.end - b.start;
                         writer.write_u64::<LE>(block_size)?
@@ -211,7 +219,7 @@ impl Entry {
                     }
                 }
                 writer.write_bool(self.encrypted)?;
-                writer.write_u32::<LE>(self.block_uncompressed.unwrap_or_default())?;
+                writer.write_u32::<LE>(self.compression_block_size)?;
             }
 
             Ok(())
@@ -230,12 +238,12 @@ impl Entry {
 
         let encrypted = (bits & (1 << 22)) != 0;
         let compression_block_count: u32 = (bits >> 6) & 0xffff;
-        let mut block_uncompressed = bits & 0x3f;
+        let mut compression_block_size = bits & 0x3f;
 
-        if block_uncompressed == 0x3f {
-            block_uncompressed = reader.read_u32::<LE>()?;
+        if compression_block_size == 0x3f {
+            compression_block_size = reader.read_u32::<LE>()?;
         } else {
-            block_uncompressed <<= 11;
+            compression_block_size <<= 11;
         }
 
         let mut var_int = |bit: u32| -> Result<_, super::Error> {
@@ -251,14 +259,6 @@ impl Entry {
         let compressed = match compression {
             Compression::None => uncompressed,
             _ => var_int(29)?,
-        };
-
-        block_uncompressed = if compression_block_count == 0 {
-            0
-        } else if uncompressed < block_uncompressed.into() {
-            uncompressed.try_into().unwrap()
-        } else {
-            block_uncompressed
         };
 
         let offset_base =
@@ -303,7 +303,7 @@ impl Entry {
             hash: None,
             blocks,
             encrypted,
-            block_uncompressed: Some(block_uncompressed),
+            compression_block_size,
         })
     }
 
