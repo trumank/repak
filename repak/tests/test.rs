@@ -82,79 +82,144 @@ mod test {
 
 static AES_KEY: &str = "lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=";
 
-macro_rules! matrix_test_read {
-    ( ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt ) => {
-        $( mt_compress_read!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+fn test_read(version: repak::Version, bytes: &[u8]) {
+    use aes::cipher::KeyInit;
+    use base64::{engine::general_purpose, Engine as _};
+    let key = general_purpose::STANDARD
+        .decode(AES_KEY)
+        .as_ref()
+        .map_err(|_| repak::Error::Base64)
+        .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
+        .unwrap();
+
+    let mut inner_reader = std::io::Cursor::new(bytes);
+    let len = inner_reader.seek(SeekFrom::End(0)).unwrap();
+    let mut reader = ReadCounter::new_size(inner_reader, len as usize);
+
+    let pak = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
+
+    assert_eq!(pak.mount_point(), "../mount/point/root/");
+    assert_eq!(pak.version(), version);
+    use std::collections::HashSet;
+    let files: HashSet<String> = HashSet::from_iter(pak.files());
+    assert_eq!(
+        files,
+        HashSet::from_iter(
+            vec!["test.txt", "test.png", "zeros.bin", "directory/nested.txt"]
+                .into_iter()
+                .map(String::from)
+        )
+    );
+
+    for file in files {
+        let mut buf = vec![];
+        let mut writer = std::io::Cursor::new(&mut buf);
+        pak.read_file(&file, &mut reader, &mut writer).unwrap();
+        match file.as_str() {
+            "test.txt" => assert_eq!(
+                buf,
+                include_bytes!("pack/root/test.txt"),
+                "test.txt incorrect contents"
+            ),
+            "test.png" => assert_eq!(
+                buf,
+                include_bytes!("pack/root/test.png"),
+                "test.png incorrect contents"
+            ),
+            "zeros.bin" => assert_eq!(
+                buf,
+                include_bytes!("pack/root/zeros.bin"),
+                "zeros.bin incorrect contents"
+            ),
+            "directory/nested.txt" => assert_eq!(
+                buf,
+                include_bytes!("pack/root/directory/nested.txt"),
+                "nested.txt incorrect contents"
+            ),
+            name => panic!("unrecognized file {}", name),
+        }
+    }
+
+    for r in reader.into_reads() {
+        // sanity check. a pak file can be constructed with a lot of dead space
+        // which wouldn't have to be read, but so far all bytes in paks generated
+        // by UnrealPak are meaningful
+        assert!(r > 0, "every byte has been read at least once");
+    }
+}
+
+fn test_write(_version: repak::Version, bytes: &[u8]) {
+    use aes::cipher::KeyInit;
+    use base64::{engine::general_purpose, Engine as _};
+    let key = general_purpose::STANDARD
+        .decode(AES_KEY)
+        .as_ref()
+        .map_err(|_| repak::Error::Base64)
+        .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
+        .unwrap();
+
+    let mut reader = std::io::Cursor::new(bytes);
+    let pak_reader = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
+
+    let writer = Cursor::new(vec![]);
+    let mut pak_writer = repak::PakWriter::new(
+        writer,
+        None,
+        pak_reader.version(),
+        pak_reader.mount_point().to_owned(),
+        Some(0x205C5A7D),
+    );
+
+    for path in pak_reader.files() {
+        let data = pak_reader.get(&path, &mut reader).unwrap();
+        pak_writer
+            .write_file(&path, &mut std::io::Cursor::new(data))
+            .unwrap();
+    }
+
+    assert_eq!(
+        pak_writer.write_index().unwrap().into_inner(),
+        reader.into_inner()
+    );
+}
+
+macro_rules! matrix_test {
+    ( $name:literal, ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt, $body:tt ) => {
+        $( matrix_test_compress!($name, $version, $exp_version, $compress, $encrypt, $encryptindex, $body); )*
     };
 }
 
-macro_rules! mt_compress_read {
-    ( $version:literal, $exp_version:expr, ($($compress:literal),* $(,)?), $encrypt:tt, $encryptindex:tt ) => {
-        $( mt_encrypt_read!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+macro_rules! matrix_test_compress {
+    ( $name:literal, $version:literal, $exp_version:expr, ($($compress:literal),* $(,)?), $encrypt:tt, $encryptindex:tt, $body:tt ) => {
+        $( matrix_test_encrypt!($name, $version, $exp_version, $compress, $encrypt, $encryptindex, $body); )*
     };
 }
 
-macro_rules! mt_encrypt_read {
-    ( $version:literal, $exp_version:expr, $compress:literal, ($($encrypt:literal),* $(,)?), $encryptindex:tt ) => {
-        $( mt_encryptindex_read!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
+macro_rules! matrix_test_encrypt {
+    ( $name:literal, $version:literal, $exp_version:expr, $compress:literal, ($($encrypt:literal),* $(,)?), $encryptindex:tt, $body:tt ) => {
+        $( matrix_test_encryptindex!($name, $version, $exp_version, $compress, $encrypt, $encryptindex, $body); )*
     };
 }
 
-macro_rules! mt_encryptindex_read {
-    ( $version:literal, $exp_version:expr, $compress:literal, $encrypt:literal, ($($encryptindex:literal),* $(,)?) ) => {
-        $(
-            paste! {
-                #[test]
-                fn [< test_read_version_ $version $compress $encrypt $encryptindex >]() {
-                    use aes::cipher::KeyInit;
-                    use base64::{engine::general_purpose, Engine as _};
-                    let key = general_purpose::STANDARD
-                                .decode(AES_KEY)
-                                .as_ref()
-                                .map_err(|_| repak::Error::Base64)
-                                .and_then(|bytes| {
-                                    aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
-                                }).unwrap();
+macro_rules! matrix_test_encryptindex {
+    ( $name:literal, $version:literal, $exp_version:expr, $compress:literal, $encrypt:literal, ($($encryptindex:literal),* $(,)?), $body:tt ) => {
+        $( matrix_test_body!($name, $version, $exp_version, $compress, $encrypt, $encryptindex, $body); )*
+    };
+}
 
-
-                    let mut inner_reader = std::io::Cursor::new(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
-                    let len = inner_reader.seek(SeekFrom::End(0)).unwrap();
-                    let mut reader = ReadCounter::new_size(inner_reader, len as usize);
-
-                    let pak = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
-
-                    assert_eq!(pak.mount_point(), "../mount/point/root/");
-                    assert_eq!(pak.version(), $exp_version);
-                    use std::collections::HashSet;
-                    let files: HashSet<String> = HashSet::from_iter(pak.files());
-                    assert_eq!(files, HashSet::from_iter(vec!["test.txt", "test.png", "zeros.bin", "directory/nested.txt"].into_iter().map(String::from)));
-
-                    for file in files {
-                        let mut buf = vec![];
-                        let mut writer = std::io::Cursor::new(&mut buf);
-                        pak.read_file(&file, &mut reader, &mut writer).unwrap();
-                        match file.as_str() {
-                            "test.txt" => assert_eq!(buf, include_bytes!("pack/root/test.txt"), "test.txt incorrect contents"),
-                            "test.png" => assert_eq!(buf, include_bytes!("pack/root/test.png"), "test.png incorrect contents"),
-                            "zeros.bin" => assert_eq!(buf, include_bytes!("pack/root/zeros.bin"), "zeros.bin incorrect contents"),
-                            "directory/nested.txt" => assert_eq!(buf, include_bytes!("pack/root/directory/nested.txt"), "nested.txt incorrect contents"),
-                            name => panic!("unrecognized file {}", name)
-                        }
-                    }
-
-                    for r in reader.into_reads() {
-                        // sanity check. a pak file can be constructed with a lot of dead space
-                        // which wouldn't have to be read, but so far all bytes in paks generated
-                        // by UnrealPak are meaningful
-                        assert!(r > 0, "every byte has been read at least once");
-                    }
-                }
+macro_rules! matrix_test_body {
+    ( $name:literal, $version:literal, $exp_version:expr, $compress:literal, $encrypt:literal, $encryptindex:literal, $body:expr ) => {
+        paste! {
+            #[test]
+            fn [< test_ $name _version_ $version $compress $encrypt $encryptindex >]() {
+                $body($exp_version, include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
             }
-        )*
+        }
     };
 }
 
-matrix_test_read!(
+matrix_test!(
+    "read",
     (
         "v5" repak::Version::V5,
         "v7" repak::Version::V7,
@@ -165,70 +230,12 @@ matrix_test_read!(
     ),
     ("", "_compress"),
     ("", "_encrypt"),
-    ("", "_encryptindex")
+    ("", "_encryptindex"),
+    test_read
 );
 
-macro_rules! matrix_test_write {
-    ( ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt ) => {
-        $( mt_compress_write!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
-    };
-}
-
-macro_rules! mt_compress_write {
-    ( $version:literal, $exp_version:expr, ($($compress:literal),* $(,)?), $encrypt:tt, $encryptindex:tt ) => {
-        $( mt_encrypt_write!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
-    };
-}
-
-macro_rules! mt_encrypt_write {
-    ( $version:literal, $exp_version:expr, $compress:literal, ($($encrypt:literal),* $(,)?), $encryptindex:tt ) => {
-        $( mt_encryptindex_write!($version, $exp_version, $compress, $encrypt, $encryptindex); )*
-    };
-}
-
-macro_rules! mt_encryptindex_write {
-    ( $version:literal, $exp_version:expr, $compress:literal, $encrypt:literal, ($($encryptindex:literal),* $(,)?) ) => {
-        $(
-            paste! {
-                #[test]
-                fn [< test_write_version_ $version $compress $encrypt $encryptindex >]() {
-                    use aes::cipher::KeyInit;
-                    use base64::{engine::general_purpose, Engine as _};
-                    let key = general_purpose::STANDARD
-                                .decode(AES_KEY)
-                                .as_ref()
-                                .map_err(|_| repak::Error::Base64)
-                                .and_then(|bytes| {
-                                    aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes)
-                                }).unwrap();
-
-                    let mut reader = std::io::Cursor::new(include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
-                    let pak_reader = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
-
-                    let writer = Cursor::new(vec![]);
-                    let mut pak_writer = repak::PakWriter::new(
-                        writer,
-                        None,
-                        pak_reader.version(),
-                        pak_reader.mount_point().to_owned(),
-                        Some(0x205C5A7D),
-                    );
-
-                    for path in pak_reader.files() {
-                        let data = pak_reader.get(&path, &mut reader).unwrap();
-                        pak_writer
-                            .write_file(&path, &mut std::io::Cursor::new(data))
-                            .unwrap();
-                    }
-
-                    assert_eq!(pak_writer.write_index().unwrap().into_inner(), reader.into_inner());
-                }
-            }
-        )*
-    };
-}
-
-matrix_test_write!(
+matrix_test!(
+    "write",
     (
         "v5" repak::Version::V5,
         "v7" repak::Version::V7,
@@ -239,5 +246,6 @@ matrix_test_write!(
     ),
     ("", /*"_compress"*/),
     ("", /*"_encrypt"*/),
-    ("", /*"_encryptindex"*/)
+    ("", /*"_encryptindex"*/),
+    test_write
 );
