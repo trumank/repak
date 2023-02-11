@@ -176,10 +176,10 @@ impl Entry {
 
                 assert!(self.blocks.is_some());
                 let blocks = self.blocks.as_ref().unwrap();
-                if blocks.len() > 1 && !(blocks.len() == 1 && !self.encrypted) {
+                if !blocks.len() == 1 || self.encrypted {
                     for b in blocks {
                         let block_size = b.end - b.start;
-                        writer.write_u64::<LE>(block_size)?
+                        writer.write_u32::<LE>(block_size.try_into().unwrap())?;
                     }
                 }
             }
