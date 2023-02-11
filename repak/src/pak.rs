@@ -23,6 +23,7 @@ pub struct Pak {
     version: Version,
     mount_point: String,
     index: Index,
+    compression: Vec<super::Compression>,
 }
 
 impl Pak {
@@ -31,6 +32,7 @@ impl Pak {
             version,
             mount_point,
             index: Index::new(path_hash_seed),
+            compression: vec![],
         }
     }
 }
@@ -310,6 +312,7 @@ impl Pak {
             version,
             mount_point,
             index,
+            compression: footer.compression,
         })
     }
 
@@ -440,7 +443,7 @@ impl Pak {
             index_size: index_buf.len() as u64,
             hash: index_hash,
             frozen: false,
-            compression: vec![],
+            compression: self.compression.clone(), // TODO: avoid this clone
         };
 
         footer.write(writer)?;

@@ -89,8 +89,17 @@ impl Footer {
             ver if ver < Version::V8B => 4,
             _ => 5,
         };
-        for _ in 0..algo_size {
-            writer.write_all(&[0; 32])?;
+        // TODO: handle if compression.len() > algo_size
+        for i in 0..algo_size {
+            let mut name = [0; 32];
+            if let Some(algo) = self.compression.get(i) {
+                if algo != &Compression::None {
+                    for (i, b) in algo.to_string().as_bytes().iter().enumerate() {
+                        name[i] = *b;
+                    }
+                }
+            }
+            writer.write_all(&name)?;
         }
         Ok(())
     }
