@@ -205,6 +205,7 @@ impl Entry {
             }
             if version.version_major() >= VersionMajor::CompressionEncryption {
                 if let Some(blocks) = &self.blocks {
+                    writer.write_u32::<LE>(blocks.len() as u32)?;
                     for block in blocks {
                         block.write(writer)?;
                     }
