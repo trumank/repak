@@ -22,6 +22,7 @@ pub struct PakWriter<W: Write + Seek> {
 pub struct Pak {
     version: Version,
     mount_point: String,
+    index_offset: Option<u64>,
     index: Index,
     compression: Vec<super::Compression>,
 }
@@ -31,6 +32,7 @@ impl Pak {
         Pak {
             version,
             mount_point,
+            index_offset: None,
             index: Index::new(path_hash_seed),
             compression: vec![],
         }
@@ -120,6 +122,18 @@ impl PakReader {
 
     pub fn files(&self) -> Vec<String> {
         self.pak.index.entries().keys().cloned().collect()
+    }
+
+    pub fn into_pakwriter<W: Write + Seek>(
+        self,
+        mut writer: W,
+    ) -> Result<PakWriter<W>, super::Error> {
+        writer.seek(io::SeekFrom::Start(self.pak.index_offset.unwrap()))?;
+        Ok(PakWriter {
+            pak: self.pak,
+            key: self.key,
+            writer,
+        })
     }
 }
 
@@ -311,6 +325,7 @@ impl Pak {
         Ok(Pak {
             version,
             mount_point,
+            index_offset: Some(footer.index_offset),
             index,
             compression: footer.compression,
         })

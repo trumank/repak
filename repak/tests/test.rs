@@ -82,7 +82,7 @@ mod test {
 
 static AES_KEY: &str = "lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=";
 
-fn test_read(version: repak::Version, bytes: &[u8]) {
+fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
     let key = general_purpose::STANDARD
@@ -148,7 +148,7 @@ fn test_read(version: repak::Version, bytes: &[u8]) {
     }
 }
 
-fn test_write(_version: repak::Version, bytes: &[u8]) {
+fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
     let key = general_purpose::STANDARD
@@ -183,6 +183,29 @@ fn test_write(_version: repak::Version, bytes: &[u8]) {
     );
 }
 
+fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
+    use aes::cipher::KeyInit;
+    use base64::{engine::general_purpose, Engine as _};
+    let key = general_purpose::STANDARD
+        .decode(AES_KEY)
+        .as_ref()
+        .map_err(|_| repak::Error::Base64)
+        .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
+        .unwrap();
+
+    let mut buf = std::io::Cursor::new(bytes.to_vec());
+    let pak_reader = repak::PakReader::new_any(&mut buf, Some(key)).unwrap();
+
+    let rewrite = pak_reader
+        .into_pakwriter(buf)
+        .unwrap()
+        .write_index()
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(bytes, rewrite);
+}
+
 macro_rules! matrix_test {
     ( $name:literal, ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt, $body:tt ) => {
         $( matrix_test_compress!($name, $version, $exp_version, $compress, $encrypt, $encryptindex, $body); )*
@@ -212,7 +235,10 @@ macro_rules! matrix_test_body {
         paste! {
             #[test]
             fn [< test_ $name _version_ $version $compress $encrypt $encryptindex >]() {
-                $body($exp_version, include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
+                $body(
+                    $exp_version,
+                    concat!("pack_", $version, $compress, $encrypt, $encryptindex, ".pak"),
+                    include_bytes!(concat!("packs/pack_", $version, $compress, $encrypt, $encryptindex, ".pak")));
             }
         }
     };
@@ -248,4 +274,20 @@ matrix_test!(
     ("", /*"_encrypt"*/),
     ("", /*"_encryptindex"*/),
     test_write
+);
+
+matrix_test!(
+    "rewrite_index",
+    (
+        "v5" repak::Version::V5,
+        "v7" repak::Version::V7,
+        "v8a" repak::Version::V8A,
+        "v8b" repak::Version::V8B,
+        "v9" repak::Version::V9,
+        "v11" repak::Version::V11,
+    ),
+    ("", "_compress"),
+    ("", "_encrypt"),
+    ("", /*"_encryptindex"*/),
+    test_rewrite_index
 );
