@@ -1,6 +1,16 @@
 # repak
 
-fork of https://github.com/bananaturtlesandwich/unpak
+Library and CLI tool for working with Unreal Engine .pak files.
+
+ - Supports reading and writing a wide range of versions
+ - Easy to use API while providing low level control:
+   - Only parses index initially and reads file data upon request
+   - Can rewrite index in place to perform append or delete operations without rewriting entire pak
+
+`repak` CLI
+ - Sane handling of mount points: defaults to `../../../` but can be configured via flag
+ - 2x faster unpacking over `UnrealPak`. As much as 30x faster has been observed (on Linux unpacked to ramdisk)
+ - Unpacking is guarded against malicious pak that attempt to write to parent directories
 
 ## compatibility
 
@@ -27,3 +37,18 @@ fork of https://github.com/bananaturtlesandwich/unpak
 
 Supports reading encrypted (both index and/or data) and compressed paks.
 Writing does not support compression or encryption yet.
+
+## notes
+
+### determinism
+
+As far as I can tell, the index is not necessarily written deterministically by `UnrealPak`. `repak` uses `BTreeMap` in place of `HashMap` to deterministically write the index and *happens* to rewrite the test paks in the same order, but this more likely than not stops happening on larger pak files.
+
+### full directory index
+
+`UnrealPak` includes a directory entry in the full directory index for all parent directories back to the pak root for a given file path regardless of whether those directories contain any files or just other directories. `repak` only includes directories that contain files. So far no functional differences have been observed as a result.
+
+## acknowledgements
+- [unpak](https://github.com/bananaturtlesandwich/unpak): original crate featuring read-only pak operations
+- [rust-u4pak](https://github.com/panzi/rust-u4pak)'s README detailing the pak file layout
+- [jieyouxu](https://github.com/jieyouxu) for serialization implementation of the significantly more complex V11 index
