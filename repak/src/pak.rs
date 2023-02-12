@@ -496,7 +496,7 @@ fn generate_path_hash_index<W: Write>(
             .collect::<Vec<_>>();
         let path_hash = fnv64(&utf16le_path, path_hash_seed);
         writer.write_u64::<LE>(path_hash)?;
-        writer.write_u32::<LE>(*offset as u32)?;
+        writer.write_u32::<LE>(*offset)?;
     }
 
     writer.write_u32::<LE>(0)?;
