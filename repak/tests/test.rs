@@ -177,10 +177,7 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
             .unwrap();
     }
 
-    assert_eq!(
-        pak_writer.write_index().unwrap().into_inner(),
-        reader.into_inner()
-    );
+    assert!(pak_writer.write_index().unwrap().into_inner() == reader.into_inner());
 }
 
 fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
@@ -203,7 +200,7 @@ fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) 
         .unwrap()
         .into_inner();
 
-    assert_eq!(bytes, rewrite);
+    assert!(bytes == rewrite);
 }
 
 macro_rules! matrix_test {
