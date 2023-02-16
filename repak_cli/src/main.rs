@@ -51,6 +51,10 @@ struct ActionUnpack {
     /// Verbose
     #[arg(short, long, default_value = "false")]
     verbose: bool,
+
+    /// Files or directories to include. Can be specified multiple times. If not specified, everything is extracted.
+    #[arg(action = clap::ArgAction::Append, short, long)]
+    include: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -169,15 +173,26 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
     }
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
+
+    let includes = args
+        .include
+        .iter()
+        .map(|i| prefix.join(Path::new(i)))
+        .collect::<Vec<_>>();
+
     pak.files().into_par_iter().try_for_each_init(
-        || File::open(&args.input),
-        |file, path| -> Result<(), repak::Error> {
+        || (File::open(&args.input), includes.clone()),
+        |(file, includes), path| -> Result<(), repak::Error> {
+            let full_path = mount_point.join(&path);
+            if !includes.is_empty() && includes.iter().find(|i| full_path.starts_with(i)).is_none()
+            {
+                return Ok(());
+            }
             if args.verbose {
                 println!("extracting {path}");
             }
             let file_path = output.join(
-                mount_point
-                    .join(&path)
+                full_path
                     .strip_prefix(prefix)
                     .map_err(|_| repak::Error::Other("prefix does not match"))?,
             );
