@@ -184,8 +184,7 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
         || (File::open(&args.input), includes.clone()),
         |(file, includes), path| -> Result<(), repak::Error> {
             let full_path = mount_point.join(&path);
-            if !includes.is_empty() && includes.iter().find(|i| full_path.starts_with(i)).is_none()
-            {
+            if !includes.is_empty() && !includes.iter().any(|i| full_path.starts_with(i)) {
                 return Ok(());
             }
             if args.verbose {
