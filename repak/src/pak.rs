@@ -115,7 +115,13 @@ impl PakReader {
         writer: &mut W,
     ) -> Result<(), super::Error> {
         match self.pak.index.entries().get(path) {
-            Some(entry) => entry.read_file(reader, self.pak.version, self.key.as_ref(), writer),
+            Some(entry) => entry.read_file(
+                reader,
+                self.pak.version,
+                &self.pak.compression,
+                self.key.as_ref(),
+                writer,
+            ),
             None => Err(super::Error::Other("no file found at given path")),
         }
     }
@@ -171,11 +177,11 @@ impl<W: Write + Seek> PakWriter<W> {
             offset,
             compressed: len,
             uncompressed: len,
-            compression: super::Compression::None,
+            compression: None,
             timestamp: None,
             hash: Some(hasher.finalize().into()),
             blocks: None,
-            encrypted: false,
+            flags: 0,
             compression_block_size: 0,
         };
 

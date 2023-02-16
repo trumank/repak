@@ -54,6 +54,11 @@ impl Footer {
                         .unwrap_or_default(),
                     )
                 }
+                if version < Version::V8A {
+                    compression.push(Compression::Zlib);
+                    compression.push(Compression::Gzip);
+                    compression.push(Compression::Oodle);
+                }
                 compression
             },
         };

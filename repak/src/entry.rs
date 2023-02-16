@@ -1,4 +1,4 @@
-use super::{ext::ReadExt, ext::WriteExt, Compression, Version, VersionMajor};
+use super::{ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
 
@@ -39,18 +39,24 @@ pub struct Entry {
     pub offset: u64,
     pub compressed: u64,
     pub uncompressed: u64,
-    pub compression: Compression,
+    pub compression: Option<u32>,
     pub timestamp: Option<u64>,
     pub hash: Option<[u8; 20]>,
     pub blocks: Option<Vec<Block>>,
-    pub encrypted: bool,
+    pub flags: u8,
     pub compression_block_size: u32,
 }
 
 impl Entry {
+    pub fn is_encrypted(&self) -> bool {
+        0 != (self.flags & 1)
+    }
+    pub fn is_deleted(&self) -> bool {
+        0 != (self.flags >> 1) & 1
+    }
     pub fn get_serialized_size(
         version: super::Version,
-        compression: Compression,
+        compression: Option<u32>,
         block_count: u32,
     ) -> u64 {
         let mut size = 0;
@@ -66,9 +72,9 @@ impl Entry {
             false => 0,
         };
         size += 20; // hash
-        size += match compression != Compression::None {
-            true => 4 + (8 + 8) * block_count as u64, // blocks
-            false => 0,
+        size += match compression {
+            Some(_) => 4 + (8 + 8) * block_count as u64, // blocks
+            None => 0,
         };
         size += 1; // encrypted
         size += match version.version_major() >= VersionMajor::CompressionEncryption {
@@ -91,8 +97,8 @@ impl Entry {
         } else {
             reader.read_u32::<LE>()?
         } {
-            0x01 | 0x10 | 0x20 => Compression::Zlib,
-            _ => Compression::None,
+            0 => None,
+            n => Some(n - 1),
         };
         Ok(Self {
             offset,
@@ -105,13 +111,15 @@ impl Entry {
             },
             hash: Some(reader.read_guid()?),
             blocks: match version.version_major() >= VersionMajor::CompressionEncryption
-                && compression != Compression::None
+                && compression.is_some()
             {
                 true => Some(reader.read_array(Block::read)?),
                 false => None,
             },
-            encrypted: version.version_major() >= VersionMajor::CompressionEncryption
-                && reader.read_bool()?,
+            flags: match version.version_major() >= VersionMajor::CompressionEncryption {
+                true => reader.read_u8()?,
+                false => 0,
+            },
             compression_block_size: match version.version_major()
                 >= VersionMajor::CompressionEncryption
             {
@@ -132,7 +140,7 @@ impl Entry {
             if (compression_block_size << 11) != self.compression_block_size {
                 compression_block_size = 0x3f;
             }
-            let compression_blocks_count = if self.compression != Compression::None {
+            let compression_blocks_count = if self.compression.is_some() {
                 self.blocks.as_ref().unwrap().len() as u32
             } else {
                 0
@@ -143,8 +151,8 @@ impl Entry {
 
             let flags = (compression_block_size)
                 | (compression_blocks_count << 6)
-                | ((self.encrypted as u32) << 22)
-                | ((self.compression as u32) << 23)
+                | ((self.is_encrypted() as u32) << 22)
+                | (self.compression.map_or(0, |n| n + 1) << 23)
                 | ((is_size_32_bit_safe as u32) << 29)
                 | ((is_uncompressed_size_32_bit_safe as u32) << 30)
                 | ((is_offset_32_bit_safe as u32) << 31);
@@ -167,7 +175,7 @@ impl Entry {
                 writer.write_u64::<LE>(self.uncompressed)?
             }
 
-            if self.compression != Compression::None {
+            if self.compression.is_some() {
                 if is_size_32_bit_safe {
                     writer.write_u32::<LE>(self.compressed as u32)?;
                 } else {
@@ -176,7 +184,7 @@ impl Entry {
 
                 assert!(self.blocks.is_some());
                 let blocks = self.blocks.as_ref().unwrap();
-                if blocks.len() > 1 || self.encrypted {
+                if blocks.len() > 1 || self.is_encrypted() {
                     for b in blocks {
                         let block_size = b.end - b.start;
                         writer.write_u32::<LE>(block_size.try_into().unwrap())?;
@@ -192,15 +200,10 @@ impl Entry {
             })?;
             writer.write_u64::<LE>(self.compressed)?;
             writer.write_u64::<LE>(self.uncompressed)?;
-            let compression: u8 = match self.compression {
-                Compression::None => 0,
-                Compression::Zlib => 1,
-                Compression::Gzip => todo!(),
-                Compression::Oodle => todo!(),
-            };
+            let compression = self.compression.map_or(0, |n| n + 1);
             match version {
-                Version::V8A => writer.write_u8(compression)?,
-                _ => writer.write_u32::<LE>(compression.into())?,
+                Version::V8A => writer.write_u8(compression.try_into().unwrap())?,
+                _ => writer.write_u32::<LE>(compression)?,
             }
 
             if version.version_major() == VersionMajor::Initial {
@@ -218,7 +221,7 @@ impl Entry {
                         block.write(writer)?;
                     }
                 }
-                writer.write_bool(self.encrypted)?;
+                writer.write_u8(self.flags)?;
                 writer.write_u32::<LE>(self.compression_block_size)?;
             }
 
@@ -232,8 +235,8 @@ impl Entry {
     ) -> Result<Self, super::Error> {
         let bits = reader.read_u32::<LE>()?;
         let compression = match (bits >> 23) & 0x3f {
-            0x01 | 0x10 | 0x20 => Compression::Zlib,
-            _ => Compression::None,
+            0 => None,
+            n => Some(n - 1),
         };
 
         let encrypted = (bits & (1 << 22)) != 0;
@@ -257,7 +260,7 @@ impl Entry {
         let offset = var_int(31)?;
         let uncompressed = var_int(30)?;
         let compressed = match compression {
-            Compression::None => uncompressed,
+            None => uncompressed,
             _ => var_int(29)?,
         };
 
@@ -302,7 +305,7 @@ impl Entry {
             compression,
             hash: None,
             blocks,
-            encrypted,
+            flags: encrypted as u8,
             compression_block_size,
         })
     }
@@ -311,17 +314,18 @@ impl Entry {
         &self,
         reader: &mut R,
         version: Version,
+        compression: &[Compression],
         key: Option<&aes::Aes256>,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
         let data_offset = reader.stream_position()?;
-        let mut data = reader.read_len(match self.encrypted {
+        let mut data = reader.read_len(match self.is_encrypted() {
             true => align(self.compressed),
             false => self.compressed,
         } as usize)?;
-        if self.encrypted {
+        if self.is_encrypted() {
             let Some(key) = key else {
                 return Err(super::Error::Encrypted);
             };
@@ -361,11 +365,12 @@ impl Entry {
                 }
             };
         }
-        match self.compression {
-            Compression::None => buf.write_all(&data)?,
-            Compression::Zlib => decompress!(flate2::read::ZlibDecoder<&[u8]>),
-            Compression::Gzip => decompress!(flate2::read::GzDecoder<&[u8]>),
-            Compression::Oodle => todo!(),
+        match self.compression.map(|c| compression[c as usize]) {
+            None => buf.write_all(&data)?,
+            Some(Compression::Zlib) => decompress!(flate2::read::ZlibDecoder<&[u8]>),
+            Some(Compression::Gzip) => decompress!(flate2::read::GzDecoder<&[u8]>),
+            Some(Compression::Oodle) => todo!("Oodle compression"),
+            _ => todo!(),
         }
         buf.flush()?;
         Ok(())
