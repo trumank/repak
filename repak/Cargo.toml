@@ -13,6 +13,7 @@ flate2 = "1.0"
 thiserror = "1.0"
 sha1 = "0.10.5"
 strum = { workspace = true }
+libloading = "0.7.4"
 
 [dev-dependencies]
 base64 = { workspace = true }

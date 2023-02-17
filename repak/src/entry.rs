@@ -335,41 +335,132 @@ impl Entry {
             }
             data.truncate(self.compressed as usize);
         }
+
+        let ranges = match &self.blocks {
+            Some(blocks) => blocks
+                .iter()
+                .map(
+                    |block| match version.version_major() >= VersionMajor::RelativeChunkOffsets {
+                        true => {
+                            (block.start - (data_offset - self.offset)) as usize
+                                ..(block.end - (data_offset - self.offset)) as usize
+                        }
+                        false => {
+                            (block.start - data_offset) as usize..(block.end - data_offset) as usize
+                        }
+                    },
+                )
+                .collect::<Vec<_>>(),
+            None => vec![0..data.len()],
+        };
+
         macro_rules! decompress {
             ($decompressor: ty) => {
-                match &self.blocks {
-                    Some(blocks) => {
-                        for block in blocks {
-                            io::copy(
-                                &mut <$decompressor>::new(
-                                    &data[match version.version_major()
-                                        >= VersionMajor::RelativeChunkOffsets
-                                    {
-                                        true => {
-                                            (block.start - (data_offset - self.offset)) as usize
-                                                ..(block.end - (data_offset - self.offset)) as usize
-                                        }
-                                        false => {
-                                            (block.start - data_offset) as usize
-                                                ..(block.end - data_offset) as usize
-                                        }
-                                    }],
-                                ),
-                                buf,
-                            )?;
-                        }
-                    }
-                    None => {
-                        io::copy(&mut flate2::read::ZlibDecoder::new(data.as_slice()), buf)?;
-                    }
+                for range in ranges {
+                    io::copy(&mut <$decompressor>::new(&data[range]), buf)?;
                 }
             };
         }
+
         match self.compression.map(|c| compression[c as usize]) {
             None => buf.write_all(&data)?,
             Some(Compression::Zlib) => decompress!(flate2::read::ZlibDecoder<&[u8]>),
             Some(Compression::Gzip) => decompress!(flate2::read::GzDecoder<&[u8]>),
-            Some(Compression::Oodle) => todo!("Oodle compression"),
+            Some(Compression::Oodle) => {
+                #[cfg(not(target_os = "windows"))]
+                return Err(super::Error::Other(
+                    "Oodle compression only supported on Windows (or WINE)",
+                ));
+
+                #[cfg(target_os = "windows")]
+                unsafe {
+                    let lib = libloading::Library::new("oo2core_9_win64.dll").map_err(|_| {
+                        super::Error::Other(
+                            "Could not find oo2core_9_win64.dll for Oodle compression",
+                        )
+                    })?;
+
+                    /*
+                    let set_printf: libloading::Symbol<
+                        unsafe extern "C" fn(
+                            unsafe extern "C" fn(
+                                i32,
+                                *const std::ffi::c_char,
+                                i32,
+                                *const std::ffi::c_char,
+                                ...
+                            ) -> std::ffi::c_int,
+                        ),
+                    > = lib.get(b"OodleCore_Plugins_SetPrintf").unwrap();
+
+                    pub unsafe extern "C" fn printf(
+                        a: i32,
+                        b: *const std::ffi::c_char,
+                        c: i32,
+                        str: *const std::ffi::c_char,
+                        mut args: ...
+                    ) -> std::ffi::c_int {
+                        use printf_compat::{format, output};
+                        let mut s = String::new();
+                        let bytes_written = format(str, args.as_va_list(), output::fmt_write(&mut s));
+                        print!("[OODLE]: {}", s);
+                        bytes_written
+                    }
+
+                    set_printf(printf);
+                    */
+
+                    let func: libloading::Symbol<
+                        extern "C" fn(
+                            compBuf: *mut u8,
+                            compBufSize: usize,
+                            rawBuf: *mut u8,
+                            rawLen: usize,
+                            fuzzSafe: u32,
+                            checkCRC: u32,
+                            verbosity: u32,
+                            decBufBase: u64,
+                            decBufSize: usize,
+                            fpCallback: u64,
+                            callbackUserData: u64,
+                            decoderMemory: u64,
+                            decoderMemorySize: usize,
+                            threadPhase: u32,
+                        ) -> i32,
+                    > = lib.get(b"OodleLZ_Decompress").unwrap();
+
+                    let mut decompressed = vec![0; self.uncompressed as usize];
+
+                    // merge all blocks into one (assuming no odd bytes) in between
+                    // oodle does not like decompressing blocks individually
+                    let buffer = &mut data[ranges[0].start..ranges[ranges.len() - 1].end];
+                    let out = func(
+                        buffer.as_mut_ptr(),
+                        buffer.len(),
+                        decompressed.as_mut_ptr(),
+                        decompressed.len(),
+                        0,
+                        0,
+                        0, //verbose 3
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        3,
+                    );
+                    if out == 0 {
+                        return Err(super::Error::Other("decompression failed"));
+                    } else {
+                        assert_eq!(
+                            out as u64, self.uncompressed,
+                            "Unexpected decompressed bytes"
+                        );
+                        buf.write_all(&decompressed)?;
+                    }
+                }
+            }
             _ => todo!(),
         }
         buf.flush()?;
