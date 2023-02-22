@@ -88,6 +88,25 @@ struct ActionPack {
     verbose: bool,
 }
 
+#[derive(Parser, Debug)]
+struct ActionGet {
+    /// Input .pak path
+    #[arg(index = 1)]
+    input: String,
+
+    /// Path to file to read to stdout
+    #[arg(index = 2)]
+    file: String,
+
+    /// Prefix to strip from entry path
+    #[arg(short, long, default_value = "../../../")]
+    strip_prefix: String,
+
+    /// Base64 encoded AES encryption key if the pak is encrypted
+    #[arg(short, long)]
+    aes_key: Option<String>,
+}
+
 #[derive(Subcommand, Debug)]
 enum Action {
     /// Print .pak info
@@ -98,6 +117,8 @@ enum Action {
     Unpack(ActionUnpack),
     /// Pack directory into .pak file
     Pack(ActionPack),
+    /// Reads a single file to stdout
+    Get(ActionGet),
 }
 
 #[derive(Parser, Debug)]
@@ -118,6 +139,7 @@ fn main() -> Result<(), repak::Error> {
         Action::List(args) => list(args),
         Action::Unpack(args) => unpack(args),
         Action::Pack(args) => pack(args),
+        Action::Get(args) => get(args),
     }
 }
 
@@ -257,5 +279,24 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
 
     pak.write_index()?;
 
+    Ok(())
+}
+
+fn get(args: ActionGet) -> Result<(), repak::Error> {
+    let mut reader = BufReader::new(File::open(&args.input)?);
+    let pak = repak::PakReader::new_any(
+        &mut reader,
+        args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
+    )?;
+    let mount_point = PathBuf::from(pak.mount_point());
+    let prefix = Path::new(&args.strip_prefix);
+
+    let full_path = mount_point.join(args.file);
+    let file = full_path
+        .strip_prefix(&prefix)
+        .map_err(|_| repak::Error::Other("prefix does not match"))?;
+
+    use std::io::Write;
+    std::io::stdout().write_all(&pak.get(&file.to_string_lossy(), &mut reader)?)?;
     Ok(())
 }
