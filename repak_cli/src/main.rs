@@ -203,9 +203,11 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
         .map(|i| prefix.join(Path::new(i)))
         .collect::<Vec<_>>();
 
+    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+
     pak.files().into_par_iter().try_for_each_init(
-        || (File::open(&args.input), includes.clone()),
-        |(file, includes), path| -> Result<(), repak::Error> {
+        || (File::open(&args.input), includes.clone(), counter.clone()),
+        |(file, includes, counter), path| -> Result<(), repak::Error> {
             let full_path = mount_point.join(&path);
             if !includes.is_empty() && !includes.iter().any(|i| full_path.starts_with(i)) {
                 return Ok(());
@@ -224,13 +226,22 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
                 ));
             }
             fs::create_dir_all(file_path.parent().expect("will be a file"))?;
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             pak.read_file(
                 &path,
                 &mut BufReader::new(file.as_ref().unwrap()), // TODO: avoid this unwrap
                 &mut fs::File::create(file_path)?,
             )
         },
-    )
+    )?;
+
+    println!(
+        "Unpacked {} files to {}",
+        counter.load(std::sync::atomic::Ordering::Relaxed),
+        output.display()
+    );
+
+    Ok(())
 }
 
 fn pack(args: ActionPack) -> Result<(), repak::Error> {
@@ -260,14 +271,14 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     paths.sort();
 
     let mut pak = repak::PakWriter::new(
-        BufWriter::new(File::create(output)?),
+        BufWriter::new(File::create(&output)?),
         None,
         args.version,
         args.mount_point,
         Some(args.path_hash_seed),
     );
 
-    for p in paths {
+    for p in &paths {
         let rel = &p
             .strip_prefix(input_path)
             .expect("file not in input directory")
@@ -276,10 +287,12 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         if args.verbose {
             println!("packing {}", &rel);
         }
-        pak.write_file(rel, &mut BufReader::new(File::open(&p)?))?;
+        pak.write_file(rel, &mut BufReader::new(File::open(p)?))?;
     }
 
     pak.write_index()?;
+
+    println!("Packed {} files to {}", paths.len(), output.display());
 
     Ok(())
 }
@@ -295,7 +308,7 @@ fn get(args: ActionGet) -> Result<(), repak::Error> {
 
     let full_path = mount_point.join(args.file);
     let file = full_path
-        .strip_prefix(&prefix)
+        .strip_prefix(prefix)
         .map_err(|_| repak::Error::Other("prefix does not match"))?;
 
     use std::io::Write;
