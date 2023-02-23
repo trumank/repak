@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand};
 use path_clean::PathClean;
+use path_slash::PathExt;
 use rayon::prelude::*;
 use strum::VariantNames;
 
@@ -270,7 +271,8 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         let rel = &p
             .strip_prefix(input_path)
             .expect("file not in input directory")
-            .to_string_lossy();
+            .to_slash()
+            .expect("failed to convert to slash path");
         if args.verbose {
             println!("packing {}", &rel);
         }
