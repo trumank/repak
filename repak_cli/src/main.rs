@@ -53,6 +53,10 @@ struct ActionUnpack {
     #[arg(short, long, default_value = "false")]
     verbose: bool,
 
+    /// Force overwrite existing files/directories.
+    #[arg(short, long, default_value = "false")]
+    force: bool,
+
     /// Files or directories to include. Can be specified multiple times. If not specified, everything is extracted.
     #[arg(action = clap::ArgAction::Append, short, long)]
     include: Vec<String>,
@@ -132,9 +136,6 @@ struct Args {
 fn main() -> Result<(), repak::Error> {
     let args = Args::parse();
 
-    //let aasdf = repak::Version::iter().map(|v| format!("{v}"));
-    //clap::builder::PossibleValuesParser::new(aasdf.map(|a| a.as_str()));
-
     match args.action {
         Action::Info(args) => info(args),
         Action::List(args) => list(args),
@@ -191,8 +192,10 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
         Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(e),
     }?;
-    if output.read_dir()?.next().is_some() {
-        return Err(repak::Error::Other("output directory not empty"));
+    if !args.force && output.read_dir()?.next().is_some() {
+        return Err(repak::Error::OutputNotEmpty(
+            output.to_string_lossy().to_string(),
+        ));
     }
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
@@ -203,43 +206,62 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
         .map(|i| prefix.join(Path::new(i)))
         .collect::<Vec<_>>();
 
-    let counter = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    struct UnpackEntry {
+        entry_path: String,
+        out_path: PathBuf,
+        out_dir: PathBuf,
+    }
 
-    pak.files().into_par_iter().try_for_each_init(
-        || (File::open(&args.input), includes.clone(), counter.clone()),
-        |(file, includes, counter), path| -> Result<(), repak::Error> {
-            let full_path = mount_point.join(&path);
-            if !includes.is_empty() && !includes.iter().any(|i| full_path.starts_with(i)) {
-                return Ok(());
-            }
+    let entries =
+        pak.files()
+            .into_iter()
+            .map(|entry_path| {
+                let full_path = mount_point.join(&entry_path);
+                if !includes.is_empty() && !includes.iter().any(|i| full_path.starts_with(i)) {
+                    return Ok(None);
+                }
+                let out_path = output
+                    .join(full_path.strip_prefix(prefix).map_err(|_| {
+                        repak::Error::PrefixMismatch {
+                            path: full_path.to_string_lossy().to_string(),
+                            prefix: prefix.to_string_lossy().to_string(),
+                        }
+                    })?)
+                    .clean();
+
+                if !out_path.starts_with(&output) {
+                    return Err(repak::Error::WriteOutsideOutput(
+                        out_path.to_string_lossy().to_string(),
+                    ));
+                }
+
+                let out_dir = out_path.parent().expect("will be a file").to_path_buf();
+
+                Ok(Some(UnpackEntry {
+                    entry_path,
+                    out_path,
+                    out_dir,
+                }))
+            })
+            .filter_map(|e| e.transpose())
+            .collect::<Result<Vec<_>, repak::Error>>()?;
+
+    entries.par_iter().try_for_each_init(
+        || File::open(&args.input),
+        |file, entry| -> Result<(), repak::Error> {
             if args.verbose {
-                println!("extracting {path}");
+                println!("extracting {}", entry.entry_path);
             }
-            let file_path = output.join(
-                full_path
-                    .strip_prefix(prefix)
-                    .map_err(|_| repak::Error::Other("prefix does not match"))?,
-            );
-            if !file_path.clean().starts_with(&output) {
-                return Err(repak::Error::Other(
-                    "tried to write file outside of output directory",
-                ));
-            }
-            fs::create_dir_all(file_path.parent().expect("will be a file"))?;
-            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            fs::create_dir_all(&entry.out_dir)?;
             pak.read_file(
-                &path,
+                &entry.entry_path,
                 &mut BufReader::new(file.as_ref().unwrap()), // TODO: avoid this unwrap
-                &mut fs::File::create(file_path)?,
+                &mut fs::File::create(&entry.out_path)?,
             )
         },
     )?;
 
-    println!(
-        "Unpacked {} files to {}",
-        counter.load(std::sync::atomic::Ordering::Relaxed),
-        output.display()
-    );
+    println!("Unpacked {} files to {}", entries.len(), output.display());
 
     Ok(())
 }
@@ -264,7 +286,9 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     }
     let input_path = Path::new(&args.input);
     if !input_path.is_dir() {
-        return Err(repak::Error::Other("input is not a directory"));
+        return Err(repak::Error::InputNotADirectory(
+            input_path.to_string_lossy().to_string(),
+        ));
     }
     let mut paths = vec![];
     collect_files(&mut paths, input_path)?;
@@ -309,7 +333,10 @@ fn get(args: ActionGet) -> Result<(), repak::Error> {
     let full_path = mount_point.join(args.file);
     let file = full_path
         .strip_prefix(prefix)
-        .map_err(|_| repak::Error::Other("prefix does not match"))?;
+        .map_err(|_| repak::Error::PrefixMismatch {
+            path: full_path.to_string_lossy().to_string(),
+            prefix: prefix.to_string_lossy().to_string(),
+        })?;
 
     use std::io::Write;
     std::io::stdout().write_all(&pak.get(&file.to_string_lossy(), &mut reader)?)?;

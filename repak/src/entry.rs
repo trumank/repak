@@ -368,17 +368,12 @@ impl Entry {
             Some(Compression::Gzip) => decompress!(flate2::read::GzDecoder<&[u8]>),
             Some(Compression::Oodle) => {
                 #[cfg(not(target_os = "windows"))]
-                return Err(super::Error::Other(
-                    "Oodle compression only supported on Windows (or WINE)",
-                ));
+                return Err(super::Error::Oodle());
 
                 #[cfg(target_os = "windows")]
                 unsafe {
-                    let lib = libloading::Library::new("oo2core_9_win64.dll").map_err(|_| {
-                        super::Error::Other(
-                            "Could not find oo2core_9_win64.dll for Oodle compression",
-                        )
-                    })?;
+                    let lib = libloading::Library::new("oo2core_9_win64.dll")
+                        .map_err(|_| super::Error::OodleMissing())?;
 
                     /*
                     let set_printf: libloading::Symbol<
@@ -451,7 +446,7 @@ impl Entry {
                         3,
                     );
                     if out == 0 {
-                        return Err(super::Error::Other("decompression failed"));
+                        return Err(super::Error::DecompressionFailed(Compression::Oodle));
                     } else {
                         assert_eq!(
                             out as u64, self.uncompressed,

@@ -91,7 +91,7 @@ impl PakReader {
                 _ => continue,
             }
         }
-        Err(super::Error::Other("version unsupported"))
+        Err(super::Error::Other("version unsupported".to_owned()))
     }
 
     pub fn version(&self) -> super::Version {
@@ -122,7 +122,7 @@ impl PakReader {
                 self.key.as_ref(),
                 writer,
             ),
-            None => Err(super::Error::Other("no file found at given path")),
+            None => Err(super::Error::MissingEntry(path.to_owned())),
         }
     }
 
