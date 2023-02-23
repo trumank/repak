@@ -178,6 +178,8 @@ fn list(args: ActionInfo) -> Result<(), repak::Error> {
     Ok(())
 }
 
+const STYLE: &str = "[{elapsed_precise}] [{wide_bar}] {pos}/{len} ({eta})";
+
 fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
     let pak = repak::PakReader::new_any(
         BufReader::new(File::open(&args.input)?),
@@ -246,11 +248,15 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
             .filter_map(|e| e.transpose())
             .collect::<Result<Vec<_>, repak::Error>>()?;
 
-    entries.par_iter().try_for_each_init(
-        || File::open(&args.input),
-        |file, entry| -> Result<(), repak::Error> {
+    use indicatif::ParallelProgressIterator;
+
+    let iter = entries.par_iter().progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+    let progress = iter.progress.clone();
+    iter.try_for_each_init(
+        || (progress.clone(), File::open(&args.input)),
+        |(progress, file), entry| -> Result<(), repak::Error> {
             if args.verbose {
-                println!("extracting {}", entry.entry_path);
+                progress.println(format!("unpacking {}", entry.entry_path));
             }
             fs::create_dir_all(&entry.out_dir)?;
             pak.read_file(
@@ -302,17 +308,21 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         Some(args.path_hash_seed),
     );
 
-    for p in &paths {
+    use indicatif::ProgressIterator;
+
+    let mut iter = paths.iter().progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+    let progress = iter.progress.clone();
+    iter.try_for_each(|p| {
         let rel = &p
             .strip_prefix(input_path)
             .expect("file not in input directory")
             .to_slash()
             .expect("failed to convert to slash path");
         if args.verbose {
-            println!("packing {}", &rel);
+            progress.println(format!("packing {}", &rel));
         }
-        pak.write_file(rel, &mut BufReader::new(File::open(p)?))?;
-    }
+        pak.write_file(rel, &mut BufReader::new(File::open(p)?))
+    })?;
 
     pak.write_index()?;
 
