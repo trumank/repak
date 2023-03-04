@@ -250,7 +250,9 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
 
     use indicatif::ParallelProgressIterator;
 
-    let iter = entries.par_iter().progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+    let iter = entries
+        .par_iter()
+        .progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
     let progress = iter.progress.clone();
     iter.try_for_each_init(
         || (progress.clone(), File::open(&args.input)),
@@ -310,7 +312,9 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
 
     use indicatif::ProgressIterator;
 
-    let mut iter = paths.iter().progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+    let mut iter = paths
+        .iter()
+        .progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
     let progress = iter.progress.clone();
     iter.try_for_each(|p| {
         let rel = &p
