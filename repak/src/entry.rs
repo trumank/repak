@@ -135,98 +135,38 @@ impl Entry {
         version: super::Version,
         location: EntryLocation,
     ) -> Result<(), super::Error> {
-        if version >= super::Version::V10 && location == EntryLocation::Index {
-            let mut compression_block_size = (self.compression_block_size >> 11) & 0x3f;
-            if (compression_block_size << 11) != self.compression_block_size {
-                compression_block_size = 0x3f;
-            }
-            let compression_blocks_count = if self.compression.is_some() {
-                self.blocks.as_ref().unwrap().len() as u32
-            } else {
-                0
-            };
-            let is_size_32_bit_safe = self.compressed <= u32::MAX as u64;
-            let is_uncompressed_size_32_bit_safe = self.uncompressed <= u32::MAX as u64;
-            let is_offset_32_bit_safe = self.offset <= u32::MAX as u64;
-
-            let flags = (compression_block_size)
-                | (compression_blocks_count << 6)
-                | ((self.is_encrypted() as u32) << 22)
-                | (self.compression.map_or(0, |n| n + 1) << 23)
-                | ((is_size_32_bit_safe as u32) << 29)
-                | ((is_uncompressed_size_32_bit_safe as u32) << 30)
-                | ((is_offset_32_bit_safe as u32) << 31);
-
-            writer.write_u32::<LE>(flags)?;
-
-            if compression_block_size == 0x3f {
-                writer.write_u32::<LE>(self.compression_block_size)?;
-            }
-
-            if is_offset_32_bit_safe {
-                writer.write_u32::<LE>(self.offset as u32)?;
-            } else {
-                writer.write_u64::<LE>(self.offset)?;
-            }
-
-            if is_uncompressed_size_32_bit_safe {
-                writer.write_u32::<LE>(self.uncompressed as u32)?
-            } else {
-                writer.write_u64::<LE>(self.uncompressed)?
-            }
-
-            if self.compression.is_some() {
-                if is_size_32_bit_safe {
-                    writer.write_u32::<LE>(self.compressed as u32)?;
-                } else {
-                    writer.write_u64::<LE>(self.compressed)?;
-                }
-
-                assert!(self.blocks.is_some());
-                let blocks = self.blocks.as_ref().unwrap();
-                if blocks.len() > 1 || self.is_encrypted() {
-                    for b in blocks {
-                        let block_size = b.end - b.start;
-                        writer.write_u32::<LE>(block_size.try_into().unwrap())?;
-                    }
-                }
-            }
-
-            Ok(())
-        } else {
-            writer.write_u64::<LE>(match location {
-                EntryLocation::Data => 0,
-                EntryLocation::Index => self.offset,
-            })?;
-            writer.write_u64::<LE>(self.compressed)?;
-            writer.write_u64::<LE>(self.uncompressed)?;
-            let compression = self.compression.map_or(0, |n| n + 1);
-            match version {
-                Version::V8A => writer.write_u8(compression.try_into().unwrap())?,
-                _ => writer.write_u32::<LE>(compression)?,
-            }
-
-            if version.version_major() == VersionMajor::Initial {
-                writer.write_u64::<LE>(self.timestamp.unwrap_or_default())?;
-            }
-            if let Some(hash) = self.hash {
-                writer.write_all(&hash)?;
-            } else {
-                panic!("hash missing");
-            }
-            if version.version_major() >= VersionMajor::CompressionEncryption {
-                if let Some(blocks) = &self.blocks {
-                    writer.write_u32::<LE>(blocks.len() as u32)?;
-                    for block in blocks {
-                        block.write(writer)?;
-                    }
-                }
-                writer.write_u8(self.flags)?;
-                writer.write_u32::<LE>(self.compression_block_size)?;
-            }
-
-            Ok(())
+        writer.write_u64::<LE>(match location {
+            EntryLocation::Data => 0,
+            EntryLocation::Index => self.offset,
+        })?;
+        writer.write_u64::<LE>(self.compressed)?;
+        writer.write_u64::<LE>(self.uncompressed)?;
+        let compression = self.compression.map_or(0, |n| n + 1);
+        match version {
+            Version::V8A => writer.write_u8(compression.try_into().unwrap())?,
+            _ => writer.write_u32::<LE>(compression)?,
         }
+
+        if version.version_major() == VersionMajor::Initial {
+            writer.write_u64::<LE>(self.timestamp.unwrap_or_default())?;
+        }
+        if let Some(hash) = self.hash {
+            writer.write_all(&hash)?;
+        } else {
+            panic!("hash missing");
+        }
+        if version.version_major() >= VersionMajor::CompressionEncryption {
+            if let Some(blocks) = &self.blocks {
+                writer.write_u32::<LE>(blocks.len() as u32)?;
+                for block in blocks {
+                    block.write(writer)?;
+                }
+            }
+            writer.write_u8(self.flags)?;
+            writer.write_u32::<LE>(self.compression_block_size)?;
+        }
+
+        Ok(())
     }
 
     pub fn read_encoded<R: io::Read>(
@@ -264,11 +204,7 @@ impl Entry {
             _ => var_int(29)?,
         };
 
-        let offset_base =
-            match version.version_major() >= VersionMajor::RelativeChunkOffsets {
-                true => 0,
-                false => offset,
-            } + Entry::get_serialized_size(version, compression, compression_block_count);
+        let offset_base = Entry::get_serialized_size(version, compression, compression_block_count);
 
         let blocks = if compression_block_count == 1 && !encrypted {
             Some(vec![Block {
@@ -308,6 +244,66 @@ impl Entry {
             flags: encrypted as u8,
             compression_block_size,
         })
+    }
+
+    pub fn write_encoded<W: io::Write>(&self, writer: &mut W) -> Result<(), super::Error> {
+        let mut compression_block_size = (self.compression_block_size >> 11) & 0x3f;
+        if (compression_block_size << 11) != self.compression_block_size {
+            compression_block_size = 0x3f;
+        }
+        let compression_blocks_count = if self.compression.is_some() {
+            self.blocks.as_ref().unwrap().len() as u32
+        } else {
+            0
+        };
+        let is_size_32_bit_safe = self.compressed <= u32::MAX as u64;
+        let is_uncompressed_size_32_bit_safe = self.uncompressed <= u32::MAX as u64;
+        let is_offset_32_bit_safe = self.offset <= u32::MAX as u64;
+
+        let flags = (compression_block_size)
+            | (compression_blocks_count << 6)
+            | ((self.is_encrypted() as u32) << 22)
+            | (self.compression.map_or(0, |n| n + 1) << 23)
+            | ((is_size_32_bit_safe as u32) << 29)
+            | ((is_uncompressed_size_32_bit_safe as u32) << 30)
+            | ((is_offset_32_bit_safe as u32) << 31);
+
+        writer.write_u32::<LE>(flags)?;
+
+        if compression_block_size == 0x3f {
+            writer.write_u32::<LE>(self.compression_block_size)?;
+        }
+
+        if is_offset_32_bit_safe {
+            writer.write_u32::<LE>(self.offset as u32)?;
+        } else {
+            writer.write_u64::<LE>(self.offset)?;
+        }
+
+        if is_uncompressed_size_32_bit_safe {
+            writer.write_u32::<LE>(self.uncompressed as u32)?
+        } else {
+            writer.write_u64::<LE>(self.uncompressed)?
+        }
+
+        if self.compression.is_some() {
+            if is_size_32_bit_safe {
+                writer.write_u32::<LE>(self.compressed as u32)?;
+            } else {
+                writer.write_u64::<LE>(self.compressed)?;
+            }
+
+            assert!(self.blocks.is_some());
+            let blocks = self.blocks.as_ref().unwrap();
+            if blocks.len() > 1 || self.is_encrypted() {
+                for b in blocks {
+                    let block_size = b.end - b.start;
+                    writer.write_u32::<LE>(block_size.try_into().unwrap())?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn read_file<R: io::Read + io::Seek, W: io::Write>(
