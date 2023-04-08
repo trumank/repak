@@ -239,13 +239,9 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
             .filter_map(|e| e.transpose())
             .collect::<Result<Vec<_>, repak::Error>>()?;
 
-    use indicatif::ParallelProgressIterator;
-
-    let iter = entries
-        .par_iter()
-        .progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
-    let progress = iter.progress.clone();
-    iter.try_for_each_init(
+    let progress = indicatif::ProgressBar::new(entries.len() as u64)
+        .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+    entries.par_iter().try_for_each_init(
         || (progress.clone(), File::open(&action.input)),
         |(progress, file), entry| -> Result<(), repak::Error> {
             if action.verbose {
@@ -256,9 +252,12 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
                 &entry.entry_path,
                 &mut BufReader::new(file.as_ref().unwrap()), // TODO: avoid this unwrap
                 &mut fs::File::create(&entry.out_path)?,
-            )
+            )?;
+            progress.inc(1);
+            Ok(())
         },
     )?;
+    progress.finish();
 
     println!("Unpacked {} files to {}", entries.len(), output.display());
 
