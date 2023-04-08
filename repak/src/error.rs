@@ -6,11 +6,8 @@ pub enum Error {
     #[error("enum conversion: {0}")]
     Strum(#[from] strum::ParseError),
 
-    #[error("key hash is an incorrect length")]
+    #[error("expect 256 bit AES key as base64 or hex string")]
     Aes,
-
-    #[error("malformed base64")]
-    Base64,
 
     // std errors
     #[error("io error: {0}")]
@@ -68,8 +65,8 @@ pub enum Error {
     #[error("error with OsString")]
     OsString(std::ffi::OsString),
 
-    #[error("{0}")]
-    Other(String),
+    #[error("version unsupported or is encrypted (possibly missing --aes-key?)")]
+    UnsuportedOrEncrypted,
 }
 
 impl std::fmt::Debug for Error {

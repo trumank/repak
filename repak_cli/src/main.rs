@@ -14,10 +14,6 @@ struct ActionInfo {
     /// Input .pak path
     #[arg(index = 1)]
     input: String,
-
-    /// Base64 encoded AES encryption key if the pak is encrypted
-    #[arg(short, long)]
-    aes_key: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -25,10 +21,6 @@ struct ActionList {
     /// Input .pak path
     #[arg(index = 1)]
     input: String,
-
-    /// Base64 encoded AES encryption key if the pak is encrypted
-    #[arg(short, long)]
-    aes_key: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -44,10 +36,6 @@ struct ActionUnpack {
     /// Prefix to strip from entry path
     #[arg(short, long, default_value = "../../../")]
     strip_prefix: String,
-
-    /// Base64 encoded AES encryption key if the pak is encrypted
-    #[arg(short, long)]
-    aes_key: Option<String>,
 
     /// Verbose
     #[arg(short, long, default_value = "false")]
@@ -106,10 +94,6 @@ struct ActionGet {
     /// Prefix to strip from entry path
     #[arg(short, long, default_value = "../../../")]
     strip_prefix: String,
-
-    /// Base64 encoded AES encryption key if the pak is encrypted
-    #[arg(short, long)]
-    aes_key: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -129,37 +113,50 @@ enum Action {
 #[derive(Parser, Debug)]
 #[command(author, version)]
 struct Args {
+    /// 256 bit AES encryption key as base64 or hex string if the pak is encrypted
+    #[arg(short, long)]
+    aes_key: Option<AesKey>,
+
     #[command(subcommand)]
     action: Action,
 }
 
-fn main() -> Result<(), repak::Error> {
-    let args = Args::parse();
-
-    match args.action {
-        Action::Info(args) => info(args),
-        Action::List(args) => list(args),
-        Action::Unpack(args) => unpack(args),
-        Action::Pack(args) => pack(args),
-        Action::Get(args) => get(args),
+#[derive(Debug, Clone)]
+struct AesKey(aes::Aes256);
+impl std::str::FromStr for AesKey {
+    type Err = repak::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use aes::cipher::KeyInit;
+        use base64::{engine::general_purpose, Engine as _};
+        let try_parse = |bytes: Vec<_>| aes::Aes256::new_from_slice(&bytes).ok().map(AesKey);
+        hex::decode(s.strip_prefix("0x").unwrap_or(s))
+            .ok()
+            .and_then(try_parse)
+            .or_else(|| {
+                general_purpose::STANDARD_NO_PAD
+                    .decode(s.trim_end_matches('='))
+                    .ok()
+                    .and_then(try_parse)
+            })
+            .ok_or(repak::Error::Aes)
     }
 }
 
-fn aes_key(key: &str) -> Result<aes::Aes256, repak::Error> {
-    use aes::cipher::KeyInit;
-    use base64::{engine::general_purpose, Engine as _};
-    general_purpose::STANDARD
-        .decode(key)
-        .as_ref()
-        .map_err(|_| repak::Error::Base64)
-        .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
+fn main() -> Result<(), repak::Error> {
+    let args = Args::parse();
+    let aes_key = args.aes_key.map(|k| k.0);
+
+    match args.action {
+        Action::Info(action) => info(aes_key, action),
+        Action::List(action) => list(aes_key, action),
+        Action::Unpack(action) => unpack(aes_key, action),
+        Action::Pack(action) => pack(action),
+        Action::Get(action) => get(aes_key, action),
+    }
 }
 
-fn info(args: ActionInfo) -> Result<(), repak::Error> {
-    let pak = repak::PakReader::new_any(
-        BufReader::new(File::open(&args.input)?),
-        args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
-    )?;
+fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::Error> {
+    let pak = repak::PakReader::new_any(BufReader::new(File::open(action.input)?), aes_key)?;
     println!("mount point: {}", pak.mount_point());
     println!("version: {}", pak.version());
     println!("version major: {}", pak.version().version_major());
@@ -167,11 +164,8 @@ fn info(args: ActionInfo) -> Result<(), repak::Error> {
     Ok(())
 }
 
-fn list(args: ActionInfo) -> Result<(), repak::Error> {
-    let pak = repak::PakReader::new_any(
-        BufReader::new(File::open(&args.input)?),
-        args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
-    )?;
+fn list(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::Error> {
+    let pak = repak::PakReader::new_any(BufReader::new(File::open(action.input)?), aes_key)?;
     for f in pak.files() {
         println!("{f}");
     }
@@ -180,29 +174,26 @@ fn list(args: ActionInfo) -> Result<(), repak::Error> {
 
 const STYLE: &str = "[{elapsed_precise}] [{wide_bar}] {pos}/{len} ({eta})";
 
-fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
-    let pak = repak::PakReader::new_any(
-        BufReader::new(File::open(&args.input)?),
-        args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
-    )?;
-    let output = args
+fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repak::Error> {
+    let pak = repak::PakReader::new_any(BufReader::new(File::open(&action.input)?), aes_key)?;
+    let output = action
         .output
         .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(&args.input).with_extension(""));
+        .unwrap_or_else(|| Path::new(&action.input).with_extension(""));
     match fs::create_dir(&output) {
         Ok(_) => Ok(()),
         Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(e),
     }?;
-    if !args.force && output.read_dir()?.next().is_some() {
+    if !action.force && output.read_dir()?.next().is_some() {
         return Err(repak::Error::OutputNotEmpty(
             output.to_string_lossy().to_string(),
         ));
     }
     let mount_point = PathBuf::from(pak.mount_point());
-    let prefix = Path::new(&args.strip_prefix);
+    let prefix = Path::new(&action.strip_prefix);
 
-    let includes = args
+    let includes = action
         .include
         .iter()
         .map(|i| prefix.join(Path::new(i)))
@@ -255,9 +246,9 @@ fn unpack(args: ActionUnpack) -> Result<(), repak::Error> {
         .progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
     let progress = iter.progress.clone();
     iter.try_for_each_init(
-        || (progress.clone(), File::open(&args.input)),
+        || (progress.clone(), File::open(&action.input)),
         |(progress, file), entry| -> Result<(), repak::Error> {
-            if args.verbose {
+            if action.verbose {
                 progress.println(format!("unpacking {}", entry.entry_path));
             }
             fs::create_dir_all(&entry.out_dir)?;
@@ -335,12 +326,9 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     Ok(())
 }
 
-fn get(args: ActionGet) -> Result<(), repak::Error> {
+fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error> {
     let mut reader = BufReader::new(File::open(&args.input)?);
-    let pak = repak::PakReader::new_any(
-        &mut reader,
-        args.aes_key.map(|k| aes_key(k.as_str())).transpose()?,
-    )?;
+    let pak = repak::PakReader::new_any(&mut reader, aes_key)?;
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
 

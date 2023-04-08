@@ -88,7 +88,7 @@ fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
     let key = general_purpose::STANDARD
         .decode(AES_KEY)
         .as_ref()
-        .map_err(|_| repak::Error::Base64)
+        .map_err(|_| repak::Error::Aes)
         .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
         .unwrap();
 
@@ -154,7 +154,7 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
     let key = general_purpose::STANDARD
         .decode(AES_KEY)
         .as_ref()
-        .map_err(|_| repak::Error::Base64)
+        .map_err(|_| repak::Error::Aes)
         .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
         .unwrap();
 
@@ -186,7 +186,7 @@ fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) 
     let key = general_purpose::STANDARD
         .decode(AES_KEY)
         .as_ref()
-        .map_err(|_| repak::Error::Base64)
+        .map_err(|_| repak::Error::Aes)
         .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
         .unwrap();
 

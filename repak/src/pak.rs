@@ -91,7 +91,7 @@ impl PakReader {
                 _ => continue,
             }
         }
-        Err(super::Error::Other("version unsupported".to_owned()))
+        Err(super::Error::UnsuportedOrEncrypted)
     }
 
     pub fn version(&self) -> super::Version {
