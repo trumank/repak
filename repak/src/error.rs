@@ -19,6 +19,9 @@ pub enum Error {
     #[error("utf16 conversion: {0}")]
     Utf16(#[from] std::string::FromUtf16Error),
 
+    #[error("ureq error: {0}")]
+    Ureq(#[from] Box<ureq::Error>), // boxed because ureq::Error is quite large
+
     #[error("bufwriter dereference: {0}")]
     IntoInner(#[from] std::io::IntoInnerError<std::io::BufWriter<Vec<u8>>>),
 
@@ -30,10 +33,10 @@ pub enum Error {
     Magic(u32),
 
     #[error("Oodle compression only supported on Windows (or WINE)")]
-    Oodle(),
+    Oodle,
 
-    #[error("Could not find oo2core_9_win64.dll for Oodle compression")]
-    OodleMissing(),
+    #[error("Could not load oo2core_9_win64.dll")]
+    OodleFailed,
 
     #[error("No entry found at {0}")]
     MissingEntry(String),
@@ -67,6 +70,9 @@ pub enum Error {
 
     #[error("version unsupported or is encrypted (possibly missing --aes-key?)")]
     UnsuportedOrEncrypted,
+
+    #[error("{0}")]
+    Other(String),
 }
 
 impl std::fmt::Debug for Error {
