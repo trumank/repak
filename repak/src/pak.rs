@@ -83,15 +83,21 @@ impl PakReader {
         mut reader: R,
         key: Option<aes::Aes256>,
     ) -> Result<Self, super::Error> {
+        use std::fmt::Write;
+        let mut log = "\n".to_owned();
+
         for ver in Version::iter() {
             match Pak::read(&mut reader, ver, key.clone()) {
                 Ok(pak) => {
                     return Ok(PakReader { pak, key });
                 }
-                _ => continue,
+                Err(err) => {
+                    writeln!(log, "trying version {} failed: {}", ver, err)?;
+                    continue;
+                }
             }
         }
-        Err(super::Error::UnsuportedOrEncrypted)
+        Err(super::Error::UnsuportedOrEncrypted(log))
     }
 
     pub fn version(&self) -> super::Version {

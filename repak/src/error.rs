@@ -13,6 +13,9 @@ pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("fmt error: {0}")]
+    Fmt(#[from] std::fmt::Error),
+
     #[error("utf8 conversion: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
 
@@ -68,8 +71,8 @@ pub enum Error {
     #[error("error with OsString")]
     OsString(std::ffi::OsString),
 
-    #[error("version unsupported or is encrypted (possibly missing --aes-key?)")]
-    UnsuportedOrEncrypted,
+    #[error("{0}version unsupported or is encrypted (possibly missing --aes-key?)")]
+    UnsuportedOrEncrypted(String),
 
     #[error("{0}")]
     Other(String),
