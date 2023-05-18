@@ -7,7 +7,7 @@ mod pak;
 
 pub use {error::*, pak::*};
 
-pub const MAGIC: u32 = 0x5A6F12E1;
+pub const MAGIC: u32 = 0xA590ED1E;
 
 #[cfg(feature = "oodle")]
 mod oodle {
@@ -44,6 +44,7 @@ pub enum Version {
     V8B,
     V9,
     V10,
+    PADDING,
     V11,
 }
 
@@ -94,7 +95,7 @@ impl Version {
         }
         if self >= Version::V8B {
             // additional compression name
-            size += 32;
+            //size += 32;
         }
         size
     }
@@ -115,6 +116,7 @@ impl Version {
             Version::V9 => VersionMajor::FrozenIndex,
             Version::V10 => VersionMajor::PathHashIndex,
             Version::V11 => VersionMajor::Fnv64BugFix,
+            _ => unreachable!(),
         }
     }
 }

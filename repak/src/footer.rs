@@ -35,7 +35,7 @@ impl Footer {
             let mut compression = Vec::with_capacity(match version {
                 ver if ver < Version::V8A => 0,
                 ver if ver < Version::V8B => 4,
-                _ => 5,
+                _ => 4,
             });
             for _ in 0..compression.capacity() {
                 compression.push(
