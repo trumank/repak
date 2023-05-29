@@ -404,7 +404,8 @@ impl Entry {
                     set_printf(printf);
                     */
 
-                    let func: libloading::Symbol<
+                    #[allow(non_snake_case)]
+                    let OodleLZ_Decompress: libloading::Symbol<
                         extern "C" fn(
                             compBuf: *mut u8,
                             compBufSize: usize,
@@ -417,7 +418,7 @@ impl Entry {
                             decBufSize: usize,
                             fpCallback: u64,
                             callbackUserData: u64,
-                            decoderMemory: u64,
+                            decoderMemory: *mut u8,
                             decoderMemorySize: usize,
                             threadPhase: u32,
                         ) -> i32,
@@ -425,34 +426,45 @@ impl Entry {
 
                     let mut decompressed = vec![0; self.uncompressed as usize];
 
-                    // merge all blocks into one (assuming no odd bytes) in between
-                    // oodle does not like decompressing blocks individually
-                    let buffer = &mut data[ranges[0].start..ranges[ranges.len() - 1].end];
-                    let out = func(
-                        buffer.as_mut_ptr(),
-                        buffer.len(),
-                        decompressed.as_mut_ptr(),
-                        decompressed.len(),
-                        0,
-                        0,
-                        0, //verbose 3
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        3,
-                    );
-                    if out == 0 {
-                        return Err(super::Error::DecompressionFailed(Compression::Oodle));
-                    } else {
-                        assert_eq!(
-                            out as u64, self.uncompressed,
-                            "Unexpected decompressed bytes"
+                    let mut compress_offset = 0;
+                    let mut decompress_offset = 0;
+                    let block_count = ranges.len();
+                    for range in ranges {
+                        let decomp = if block_count == 1 {
+                            self.uncompressed as usize
+                        } else {
+                            (self.compression_block_size as usize)
+                                .min(self.uncompressed as usize - compress_offset)
+                        };
+                        let buffer = &mut data[range];
+                        let out = OodleLZ_Decompress(
+                            buffer.as_mut_ptr(),
+                            buffer.len(),
+                            decompressed.as_mut_ptr().offset(decompress_offset),
+                            decomp,
+                            1,
+                            1,
+                            0, //verbose 3
+                            0,
+                            0,
+                            0,
+                            0,
+                            std::ptr::null_mut(),
+                            0,
+                            3,
                         );
-                        buf.write_all(&decompressed)?;
+                        if out == 0 {
+                            return Err(super::Error::DecompressionFailed(Compression::Oodle));
+                        }
+                        compress_offset += self.compression_block_size as usize;
+                        decompress_offset += out as isize;
                     }
+
+                    assert_eq!(
+                        decompress_offset, self.uncompressed as isize,
+                        "Oodle decompression length mismatch"
+                    );
+                    buf.write_all(&decompressed)?;
                 }
             }
             _ => todo!(),
