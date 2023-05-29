@@ -301,6 +301,10 @@ impl Pak {
                 let mut encoded_entries = io::Cursor::new(&encoded_entries);
                 for (dir_name, dir) in fdi {
                     for (file_name, encoded_offset) in dir {
+                        if *encoded_offset == 0x80000000 {
+                            println!("{file_name:?} has invalid offset: 0x{encoded_offset:08x}");
+                            continue;
+                        }
                         encoded_entries.seek(io::SeekFrom::Start(*encoded_offset as u64))?;
                         let entry =
                             super::entry::Entry::read_encoded(&mut encoded_entries, version)?;
