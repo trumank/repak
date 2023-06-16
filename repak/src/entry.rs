@@ -362,6 +362,11 @@ impl Entry {
             None => buf.write_all(&data)?,
             Some(Compression::Zlib) => decompress!(flate2::read::ZlibDecoder<&[u8]>),
             Some(Compression::Gzip) => decompress!(flate2::read::GzDecoder<&[u8]>),
+            Some(Compression::Zstd) => {
+                for range in ranges {
+                    io::copy(&mut zstd::stream::read::Decoder::new(&data[range])?, buf)?;
+                }
+            }
             Some(Compression::Oodle) => {
                 #[cfg(not(target_os = "windows"))]
                 return Err(super::Error::Oodle);

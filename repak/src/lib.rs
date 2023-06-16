@@ -117,4 +117,5 @@ pub enum Compression {
     Zlib,
     Gzip,
     Oodle,
+    Zstd,
 }
