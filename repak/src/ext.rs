@@ -7,6 +7,11 @@ pub trait ReadExt {
         &mut self,
         func: impl FnMut(&mut Self) -> Result<T, super::Error>,
     ) -> Result<Vec<T>, super::Error>;
+    fn read_array_len<T>(
+        &mut self,
+        len: usize,
+        func: impl FnMut(&mut Self) -> Result<T, super::Error>,
+    ) -> Result<Vec<T>, super::Error>;
     fn read_string(&mut self) -> Result<String, super::Error>;
     fn read_len(&mut self, len: usize) -> Result<Vec<u8>, super::Error>;
 }
@@ -33,9 +38,18 @@ impl<R: std::io::Read> ReadExt for R {
 
     fn read_array<T>(
         &mut self,
+        func: impl FnMut(&mut Self) -> Result<T, super::Error>,
+    ) -> Result<Vec<T>, super::Error> {
+        let len = self.read_u32::<LE>()? as usize;
+        self.read_array_len(len, func)
+    }
+
+    fn read_array_len<T>(
+        &mut self,
+        len: usize,
         mut func: impl FnMut(&mut Self) -> Result<T, super::Error>,
     ) -> Result<Vec<T>, super::Error> {
-        let mut buf = Vec::with_capacity(self.read_u32::<LE>()? as usize);
+        let mut buf = Vec::with_capacity(len);
         for _ in 0..buf.capacity() {
             buf.push(func(self)?);
         }
@@ -43,19 +57,17 @@ impl<R: std::io::Read> ReadExt for R {
     }
 
     fn read_string(&mut self) -> Result<String, super::Error> {
-        let mut buf = match self.read_i32::<LE>()? {
-            size if size.is_negative() => {
-                let mut buf = Vec::with_capacity(-size as usize);
-                for _ in 0..buf.capacity() {
-                    buf.push(self.read_u16::<LE>()?);
-                }
-                String::from_utf16(&buf)?
-            }
-            size => String::from_utf8(self.read_len(size as usize)?)?,
-        };
-        // remove the null byte
-        buf.pop();
-        Ok(buf)
+        let len = self.read_i32::<LE>()?;
+        if len < 0 {
+            let chars = self.read_array_len((-len) as usize, |r| Ok(r.read_u16::<LE>()?))?;
+            let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
+            Ok(String::from_utf16(&chars[..length]).unwrap())
+        } else {
+            let mut chars = vec![0; len as usize];
+            self.read_exact(&mut chars)?;
+            let length = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
+            Ok(String::from_utf8_lossy(&chars[..length]).into_owned())
+        }
     }
 
     fn read_len(&mut self, len: usize) -> Result<Vec<u8>, super::Error> {
@@ -74,10 +86,18 @@ impl<W: std::io::Write> WriteExt for W {
         Ok(())
     }
     fn write_string(&mut self, value: &str) -> Result<(), super::Error> {
-        let bytes = value.as_bytes();
-        self.write_u32::<LE>(bytes.len() as u32 + 1)?;
-        self.write_all(bytes)?;
-        self.write_u8(0)?;
+        if value.is_empty() || value.is_ascii() {
+            self.write_u32::<LE>(value.as_bytes().len() as u32 + 1)?;
+            self.write_all(value.as_bytes())?;
+            self.write_u8(0)?;
+        } else {
+            let chars: Vec<u16> = value.encode_utf16().collect();
+            self.write_i32::<LE>(-(chars.len() as i32 + 1))?;
+            for c in chars {
+                self.write_u16::<LE>(c)?;
+            }
+            self.write_u16::<LE>(0)?;
+        }
         Ok(())
     }
 }
