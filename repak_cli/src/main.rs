@@ -21,6 +21,10 @@ struct ActionList {
     /// Input .pak path
     #[arg(index = 1)]
     input: String,
+
+    /// Prefix to strip from entry path
+    #[arg(short, long, default_value = "../../../")]
+    strip_prefix: String,
 }
 
 #[derive(Parser, Debug)]
@@ -101,7 +105,7 @@ enum Action {
     /// Print .pak info
     Info(ActionInfo),
     /// List .pak files
-    List(ActionInfo),
+    List(ActionList),
     /// Unpack .pak file
     Unpack(ActionUnpack),
     /// Pack directory into .pak file
@@ -164,11 +168,32 @@ fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::E
     Ok(())
 }
 
-fn list(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::Error> {
+fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::Error> {
     let pak = repak::PakReader::new_any(BufReader::new(File::open(action.input)?), aes_key)?;
-    for f in pak.files() {
-        println!("{f}");
+
+    let mount_point = PathBuf::from(pak.mount_point());
+    let prefix = Path::new(&action.strip_prefix);
+
+    let full_paths = pak
+        .files()
+        .into_iter()
+        .map(|f| mount_point.join(f))
+        .collect::<Vec<_>>();
+    let stripped = full_paths
+        .iter()
+        .map(|f| {
+            f.strip_prefix(prefix)
+                .map_err(|_| repak::Error::PrefixMismatch {
+                    path: f.to_string_lossy().to_string(),
+                    prefix: prefix.to_string_lossy().to_string(),
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for f in stripped {
+        println!("{}", f.display());
     }
+
     Ok(())
 }
 
