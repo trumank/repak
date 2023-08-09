@@ -24,6 +24,8 @@ pub struct Pak {
     mount_point: String,
     index_offset: Option<u64>,
     index: Index,
+    encrypted_index: bool,
+    encryption_guid: Option<u128>,
     compression: Vec<super::Compression>,
 }
 
@@ -34,6 +36,8 @@ impl Pak {
             mount_point,
             index_offset: None,
             index: Index::new(path_hash_seed),
+            encrypted_index: false,
+            encryption_guid: None,
             compression: vec![],
         }
     }
@@ -106,6 +110,14 @@ impl PakReader {
 
     pub fn mount_point(&self) -> &str {
         &self.pak.mount_point
+    }
+
+    pub fn encrypted_index(&self) -> bool {
+        self.pak.encrypted_index
+    }
+
+    pub fn encryption_guid(&self) -> Option<u128> {
+        self.pak.encryption_guid
     }
 
     pub fn get<R: Read + Seek>(&self, path: &str, reader: &mut R) -> Result<Vec<u8>, super::Error> {
@@ -343,6 +355,8 @@ impl Pak {
             mount_point,
             index_offset: Some(footer.index_offset),
             index,
+            encrypted_index: footer.encrypted,
+            encryption_guid: footer.encryption_uuid,
             compression: footer.compression,
         })
     }

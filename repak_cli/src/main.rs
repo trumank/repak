@@ -164,6 +164,8 @@ fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::E
     println!("mount point: {}", pak.mount_point());
     println!("version: {}", pak.version());
     println!("version major: {}", pak.version().version_major());
+    println!("encrypted index: {}", pak.encrypted_index());
+    println!("encrytion guid: {:032X?}", pak.encryption_guid());
     println!("{} file entries", pak.files().len());
     Ok(())
 }
