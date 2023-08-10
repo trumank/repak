@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
@@ -18,6 +19,17 @@ struct ActionInfo {
 
 #[derive(Parser, Debug)]
 struct ActionList {
+    /// Input .pak path
+    #[arg(index = 1)]
+    input: String,
+
+    /// Prefix to strip from entry path
+    #[arg(short, long, default_value = "../../../")]
+    strip_prefix: String,
+}
+
+#[derive(Parser, Debug)]
+struct ActionHashList {
     /// Input .pak path
     #[arg(index = 1)]
     input: String,
@@ -106,6 +118,8 @@ enum Action {
     Info(ActionInfo),
     /// List .pak files
     List(ActionList),
+    /// List .pka files and the SHA256 of their contents. Useful for finding differences between paks
+    HashList(ActionHashList),
     /// Unpack .pak file
     Unpack(ActionUnpack),
     /// Pack directory into .pak file
@@ -153,6 +167,7 @@ fn main() -> Result<(), repak::Error> {
     match args.action {
         Action::Info(action) => info(aes_key, action),
         Action::List(action) => list(aes_key, action),
+        Action::HashList(action) => hash_list(aes_key, action),
         Action::Unpack(action) => unpack(aes_key, action),
         Action::Pack(action) => pack(action),
         Action::Get(action) => get(aes_key, action),
@@ -193,7 +208,56 @@ fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::E
         .collect::<Result<Vec<_>, _>>()?;
 
     for f in stripped {
-        println!("{}", f.display());
+        println!("{}", f.to_slash_lossy());
+    }
+
+    Ok(())
+}
+
+fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(), repak::Error> {
+    let mut reader = BufReader::new(File::open(&action.input)?);
+    let pak = repak::PakReader::new_any(&mut reader, aes_key)?;
+
+    let mount_point = PathBuf::from(pak.mount_point());
+    let prefix = Path::new(&action.strip_prefix);
+
+    let full_paths = pak
+        .files()
+        .into_iter()
+        .map(|f| (mount_point.join(&f), f))
+        .collect::<Vec<_>>();
+    let stripped = full_paths
+        .iter()
+        .map(|(full_path, _path)| {
+            full_path.strip_prefix(prefix)
+                .map_err(|_| repak::Error::PrefixMismatch {
+                    path: full_path.to_string_lossy().to_string(),
+                    prefix: prefix.to_string_lossy().to_string(),
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let hashes: std::sync::Arc<std::sync::Mutex<BTreeMap::<std::borrow::Cow<'_, str>, Vec<u8>>>> = Default::default();
+
+    full_paths.par_iter().zip(stripped).try_for_each_init(
+        || (hashes.clone(), File::open(&action.input)),
+        |(hashes, file), ((_full_path, path), stripped)| -> Result<(), repak::Error> {
+            use sha2::Digest;
+
+            let mut hasher = sha2::Sha256::new();
+            pak.read_file(
+                path,
+                &mut BufReader::new(file.as_ref().unwrap()),
+                &mut hasher,
+            )?;
+            let hash = hasher.finalize();
+            hashes.lock().unwrap().insert(stripped.to_slash_lossy(), hash.to_vec());
+            Ok(())
+        },
+    )?;
+
+    for (file, hash) in hashes.lock().unwrap().iter() {
+        println!("{} {}", hex::encode(hash), file);
     }
 
     Ok(())
