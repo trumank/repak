@@ -229,7 +229,8 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
     let stripped = full_paths
         .iter()
         .map(|(full_path, _path)| {
-            full_path.strip_prefix(prefix)
+            full_path
+                .strip_prefix(prefix)
                 .map_err(|_| repak::Error::PrefixMismatch {
                     path: full_path.to_string_lossy().to_string(),
                     prefix: prefix.to_string_lossy().to_string(),
@@ -237,7 +238,8 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let hashes: std::sync::Arc<std::sync::Mutex<BTreeMap::<std::borrow::Cow<'_, str>, Vec<u8>>>> = Default::default();
+    let hashes: std::sync::Arc<std::sync::Mutex<BTreeMap<std::borrow::Cow<'_, str>, Vec<u8>>>> =
+        Default::default();
 
     full_paths.par_iter().zip(stripped).try_for_each_init(
         || (hashes.clone(), File::open(&action.input)),
@@ -251,7 +253,10 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
                 &mut hasher,
             )?;
             let hash = hasher.finalize();
-            hashes.lock().unwrap().insert(stripped.to_slash_lossy(), hash.to_vec());
+            hashes
+                .lock()
+                .unwrap()
+                .insert(stripped.to_slash_lossy(), hash.to_vec());
             Ok(())
         },
     )?;
