@@ -357,12 +357,9 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
 
 fn pack(args: ActionPack) -> Result<(), repak::Error> {
     let output = args.output.map(PathBuf::from).unwrap_or_else(|| {
-        let mut output = PathBuf::new();
-        output.push(&args.input);
         // NOTE: don't use `with_extension` here because it will replace e.g. the `.1` in
         // `test_v1.1`.
-        output.push(".pak");
-        output
+        PathBuf::from(format!("{}.pak", args.input))
     });
 
     fn collect_files(paths: &mut Vec<PathBuf>, dir: &Path) -> io::Result<()> {
