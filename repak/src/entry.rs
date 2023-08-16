@@ -311,25 +311,31 @@ impl Entry {
         reader: &mut R,
         version: Version,
         compression: &[Compression],
-        key: Option<&aes::Aes256>,
+        #[cfg(feature = "encryption")] key: Option<&aes::Aes256>,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
         let data_offset = reader.stream_position()?;
+        #[allow(unused_mut)]
         let mut data = reader.read_len(match self.is_encrypted() {
             true => align(self.compressed),
             false => self.compressed,
         } as usize)?;
         if self.is_encrypted() {
-            let Some(key) = key else {
-                return Err(super::Error::Encrypted);
-            };
-            use aes::cipher::BlockDecrypt;
-            for block in data.chunks_mut(16) {
-                key.decrypt_block(aes::Block::from_mut_slice(block))
+            #[cfg(not(feature = "encryption"))]
+            return Err(super::Error::Encryption);
+            #[cfg(feature = "encryption")]
+            {
+                let Some(key) = key else {
+                    return Err(super::Error::Encrypted);
+                };
+                use aes::cipher::BlockDecrypt;
+                for block in data.chunks_mut(16) {
+                    key.decrypt_block(aes::Block::from_mut_slice(block))
+                }
+                data.truncate(self.compressed as usize);
             }
-            data.truncate(self.compressed as usize);
         }
 
         let ranges = match &self.blocks {

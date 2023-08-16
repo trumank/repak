@@ -7,13 +7,14 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["compression"]
+default = ["compression", "encryption"]
 compression = ["dep:flate2", "dep:zstd"]
 oodle = ["dep:libloading", "dep:ureq", "dep:once_cell", "dep:hex-literal", "dep:hex"]
+encryption = ["dep:aes"]
 
 [dependencies]
 byteorder = "1.4"
-aes = "0.8"
+aes = { version = "0.8", optional = true }
 flate2 = { version = "1.0", optional = true }
 zstd = { version = "0.12", optional = true }
 thiserror = "1.0"

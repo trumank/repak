@@ -13,6 +13,9 @@ pub enum Error {
     #[error("enable the compression feature to read compressed paks")]
     Compression,
 
+    #[error("enable the encryption feature to read encrypted paks")]
+    Encryption,
+
     #[error("enable the oodle feature to read oodle paks")]
     Oodle,
 
