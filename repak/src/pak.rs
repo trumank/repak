@@ -96,7 +96,7 @@ impl PakReader {
                 Err(err) => writeln!(log, "trying version {} failed: {}", ver, err)?,
             }
         }
-        Err(super::Error::UnsuportedOrEncrypted(log))
+        Err(super::Error::UnsupportedOrEncrypted(log))
     }
 
     pub fn new<R: Read + Seek>(

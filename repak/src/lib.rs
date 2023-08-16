@@ -7,6 +7,9 @@ mod pak;
 
 pub use {error::*, pak::*};
 
+#[cfg(all(feature = "oodle", not(target_os = "windows")))]
+compile_error!("Oodle compression only supported on Windows (or WINE)");
+
 pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[derive(

@@ -9,6 +9,13 @@ pub enum Error {
     #[error("expect 256 bit AES key as base64 or hex string")]
     Aes,
 
+    // feature errors
+    #[error("enable the compression feature to read compressed paks")]
+    Compression,
+
+    #[error("enable the oodle feature to read oodle paks")]
+    Oodle,
+
     // std errors
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -22,6 +29,7 @@ pub enum Error {
     #[error("utf16 conversion: {0}")]
     Utf16(#[from] std::string::FromUtf16Error),
 
+    #[cfg(feature = "oodle")]
     #[error("ureq error: {0}")]
     Ureq(#[from] Box<ureq::Error>), // boxed because ureq::Error is quite large
 
@@ -34,9 +42,6 @@ pub enum Error {
 
     #[error("found magic of {0:#x} instead of {:#x}", super::MAGIC)]
     Magic(u32),
-
-    #[error("Oodle compression only supported on Windows (or WINE)")]
-    Oodle,
 
     #[error("Could not load oo2core_9_win64.dll")]
     OodleFailed,
@@ -72,7 +77,7 @@ pub enum Error {
     OsString(std::ffi::OsString),
 
     #[error("{0}version unsupported or is encrypted (possibly missing --aes-key?)")]
-    UnsuportedOrEncrypted(String),
+    UnsupportedOrEncrypted(String),
 
     #[error("{0}")]
     Other(String),
