@@ -350,6 +350,7 @@ impl Entry {
             None => vec![0..data.len()],
         };
 
+        #[cfg(feature = "compression")]
         macro_rules! decompress {
             ($decompressor: ty) => {
                 for range in ranges {
@@ -359,14 +360,18 @@ impl Entry {
         }
 
         match self.compression.map(|c| compression[c as usize]) {
-            None => buf.write_all(&data)?,
+            None | Some(Compression::None) => buf.write_all(&data)?,
+            #[cfg(feature = "compression")]
             Some(Compression::Zlib) => decompress!(flate2::read::ZlibDecoder<&[u8]>),
+            #[cfg(feature = "compression")]
             Some(Compression::Gzip) => decompress!(flate2::read::GzDecoder<&[u8]>),
+            #[cfg(feature = "compression")]
             Some(Compression::Zstd) => {
                 for range in ranges {
                     io::copy(&mut zstd::stream::read::Decoder::new(&data[range])?, buf)?;
                 }
             }
+            #[cfg(feature = "oodle")]
             Some(Compression::Oodle) => {
                 #[cfg(not(target_os = "windows"))]
                 return Err(super::Error::Oodle);
@@ -472,18 +477,25 @@ impl Entry {
                     buf.write_all(&decompressed)?;
                 }
             }
-            _ => todo!(),
+            #[cfg(not(feature = "oodle"))]
+            Some(Compression::Oodle) => return Err(super::Error::Oodle),
+            #[cfg(not(feature = "compression"))]
+            _ => return Err(super::Error::Compression),
         }
         buf.flush()?;
         Ok(())
     }
 }
 
+#[cfg(feature = "oodle")]
 use once_cell::sync::Lazy;
+#[cfg(feature = "oodle")]
 static OODLE: Lazy<Result<libloading::Library, String>> =
     Lazy::new(|| get_oodle().map_err(|e| e.to_string()));
+#[cfg(feature = "oodle")]
 static OODLE_HASH: [u8; 20] = hex_literal::hex!("4bcc73614cb8fd2b0bce8d0f91ee5f3202d9d624");
 
+#[cfg(feature = "oodle")]
 fn get_oodle() -> Result<libloading::Library, super::Error> {
     use sha1::{Digest, Sha1};
 

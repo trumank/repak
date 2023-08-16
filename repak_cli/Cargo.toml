@@ -19,6 +19,6 @@ indicatif = { version = "0.17.3", features = ["rayon"] }
 path-clean = "0.1.0"
 path-slash = "0.2.1"
 rayon = "1.6.1"
-repak = { version = "0.1.7", path = "../repak" }
+repak = { version = "0.1.7", path = "../repak", features = ["oodle"] }
 sha2 = "0.10.7"
 strum = { workspace = true }

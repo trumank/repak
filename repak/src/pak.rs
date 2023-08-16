@@ -101,7 +101,7 @@ impl PakReader {
                 }
             }
         }
-        Err(super::Error::UnsuportedOrEncrypted(log))
+        Err(super::Error::UnsupportedOrEncrypted(log))
     }
 
     pub fn version(&self) -> super::Version {
