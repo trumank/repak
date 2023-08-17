@@ -80,8 +80,10 @@ mod test {
     }
 }
 
+#[cfg(all(feature = "encryption", feature = "compression"))]
 static AES_KEY: &str = "lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=";
 
+#[cfg(all(feature = "encryption", feature = "compression"))]
 fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
@@ -96,7 +98,7 @@ fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
     let len = inner_reader.seek(SeekFrom::End(0)).unwrap();
     let mut reader = ReadCounter::new_size(inner_reader, len as usize);
 
-    let pak = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
+    let pak = repak::PakReader::new_any_aes(&mut reader, Some(key)).unwrap();
 
     assert_eq!(pak.mount_point(), "../mount/point/root/");
     assert_eq!(pak.version(), version);
@@ -148,6 +150,7 @@ fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
     }
 }
 
+#[cfg(all(feature = "encryption", feature = "compression"))]
 fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
@@ -159,10 +162,10 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
         .unwrap();
 
     let mut reader = std::io::Cursor::new(bytes);
-    let pak_reader = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
+    let pak_reader = repak::PakReader::new_any_aes(&mut reader, Some(key)).unwrap();
 
     let writer = Cursor::new(vec![]);
-    let mut pak_writer = repak::PakWriter::new(
+    let mut pak_writer = repak::PakWriter::new_aes(
         writer,
         None,
         pak_reader.version(),
@@ -180,6 +183,7 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
     assert!(pak_writer.write_index().unwrap().into_inner() == reader.into_inner());
 }
 
+#[cfg(all(feature = "encryption", feature = "compression"))]
 fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
@@ -191,7 +195,7 @@ fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) 
         .unwrap();
 
     let mut buf = std::io::Cursor::new(bytes.to_vec());
-    let pak_reader = repak::PakReader::new_any(&mut buf, Some(key)).unwrap();
+    let pak_reader = repak::PakReader::new_any_aes(&mut buf, Some(key)).unwrap();
 
     let rewrite = pak_reader
         .into_pakwriter(buf)
@@ -231,6 +235,7 @@ macro_rules! matrix_test_body {
     ( $name:literal, $version:literal, $exp_version:expr, $compress:literal, $encrypt:literal, $encryptindex:literal, $body:expr ) => {
         paste! {
             #[test]
+            #[cfg(all(feature = "encryption", feature = "compression"))]
             fn [< test_ $name _version_ $version $compress $encrypt $encryptindex >]() {
                 $body(
                     $exp_version,

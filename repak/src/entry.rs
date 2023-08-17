@@ -1,4 +1,4 @@
-use super::{ext::ReadExt, Compression, Version, VersionMajor};
+use super::{ext::ReadExt, Compression, PakEncryption, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
 
@@ -306,17 +306,20 @@ impl Entry {
         Ok(())
     }
 
-    pub fn read_file<R: io::Read + io::Seek, W: io::Write>(
+    pub(crate) fn read_file<R: io::Read + io::Seek, W: io::Write>(
         &self,
         reader: &mut R,
         version: Version,
         compression: &[Compression],
-        #[cfg(feature = "encryption")] key: Option<&aes::Aes256>,
+        #[allow(unused)] key: &PakEncryption,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
+
+        #[cfg(feature = "compression")]
         let data_offset = reader.stream_position()?;
+
         #[allow(unused_mut)]
         let mut data = reader.read_len(match self.is_encrypted() {
             true => align(self.compressed),
@@ -327,7 +330,7 @@ impl Entry {
             return Err(super::Error::Encryption);
             #[cfg(feature = "encryption")]
             {
-                let Some(key) = key else {
+                let PakEncryption::Aes(key) = key else {
                     return Err(super::Error::Encrypted);
                 };
                 use aes::cipher::BlockDecrypt;
@@ -338,6 +341,7 @@ impl Entry {
             }
         }
 
+        #[cfg(feature = "compression")]
         let ranges = match &self.blocks {
             Some(blocks) => blocks
                 .iter()
