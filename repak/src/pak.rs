@@ -45,7 +45,7 @@ impl Pak {
 }
 
 #[derive(Debug, Clone)]
-pub enum PakEncryption {
+pub(crate) enum PakEncryption {
     None,
     #[cfg(feature = "encryption")]
     Aes(Box<Aes256>),
