@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = ["repak", "repak_cli"]
 
 [workspace.package]
