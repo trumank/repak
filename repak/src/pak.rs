@@ -84,14 +84,14 @@ fn decrypt(key: &Option<aes::Aes256>, bytes: &mut [u8]) -> Result<(), super::Err
 
 impl PakReader {
     pub fn new_any<R: Read + Seek>(
-        mut reader: R,
+        reader: &mut R,
         key: Option<aes::Aes256>,
     ) -> Result<Self, super::Error> {
         use std::fmt::Write;
         let mut log = "\n".to_owned();
 
         for ver in Version::iter() {
-            match Pak::read(&mut reader, ver, key.clone()) {
+            match Pak::read(&mut *reader, ver, key.clone()) {
                 Ok(pak) => {
                     return Ok(PakReader { pak, key });
                 }
