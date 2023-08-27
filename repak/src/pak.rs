@@ -226,13 +226,13 @@ impl<W: Write + Seek> PakWriter<W> {
 
 impl Pak {
     fn read<R: Read + Seek>(
-        mut reader: R,
+        reader: &mut R,
         version: super::Version,
         key: Option<&aes::Aes256>,
     ) -> Result<Self, super::Error> {
         // read footer to get index, encryption & compression info
         reader.seek(io::SeekFrom::End(-version.size()))?;
-        let footer = super::footer::Footer::read(&mut reader, version)?;
+        let footer = super::footer::Footer::read(reader, version)?;
         // read index to get all the entry info
         reader.seek(io::SeekFrom::Start(footer.index_offset))?;
         let mut index = reader.read_len(footer.index_size as usize)?;
