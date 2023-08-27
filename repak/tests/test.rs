@@ -96,7 +96,7 @@ fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
     let len = inner_reader.seek(SeekFrom::End(0)).unwrap();
     let mut reader = ReadCounter::new_size(inner_reader, len as usize);
 
-    let pak = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
+    let pak = repak::PakReader::new_any_with_key(&mut reader, Some(key)).unwrap();
 
     assert_eq!(pak.mount_point(), "../mount/point/root/");
     assert_eq!(pak.version(), version);
@@ -159,10 +159,10 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
         .unwrap();
 
     let mut reader = std::io::Cursor::new(bytes);
-    let pak_reader = repak::PakReader::new_any(&mut reader, Some(key)).unwrap();
+    let pak_reader = repak::PakReader::new_any_with_key(&mut reader, Some(key)).unwrap();
 
     let writer = Cursor::new(vec![]);
-    let mut pak_writer = repak::PakWriter::new(
+    let mut pak_writer = repak::PakWriter::new_with_key(
         writer,
         None,
         pak_reader.version(),
@@ -191,7 +191,7 @@ fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) 
         .unwrap();
 
     let mut buf = std::io::Cursor::new(bytes.to_vec());
-    let pak_reader = repak::PakReader::new_any(&mut buf, Some(key)).unwrap();
+    let pak_reader = repak::PakReader::new_any_with_key(&mut buf, Some(key)).unwrap();
 
     let rewrite = pak_reader
         .into_pakwriter(buf)

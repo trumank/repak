@@ -3,13 +3,13 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum EntryLocation {
+pub(crate) enum EntryLocation {
     Data,
     Index,
 }
 
 #[derive(Debug)]
-pub struct Block {
+pub(crate) struct Block {
     pub start: u64,
     pub end: u64,
 }
@@ -35,7 +35,7 @@ fn align(offset: u64) -> u64 {
 }
 
 #[derive(Debug)]
-pub struct Entry {
+pub(crate) struct Entry {
     pub offset: u64,
     pub compressed: u64,
     pub uncompressed: u64,
@@ -311,7 +311,7 @@ impl Entry {
         reader: &mut R,
         version: Version,
         compression: &[Compression],
-        #[cfg(feature = "encryption")] key: Option<&aes::Aes256>,
+        key: &super::Key,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
@@ -328,7 +328,7 @@ impl Entry {
             return Err(super::Error::Encryption);
             #[cfg(feature = "encryption")]
             {
-                let Some(key) = key else {
+                let super::Key::Some(key) = key else {
                     return Err(super::Error::Encrypted);
                 };
                 use aes::cipher::BlockDecrypt;
@@ -423,6 +423,7 @@ impl Entry {
                     */
 
                     #[allow(non_snake_case)]
+                    #[allow(clippy::type_complexity)]
                     let OodleLZ_Decompress: libloading::Symbol<
                         extern "C" fn(
                             compBuf: *mut u8,

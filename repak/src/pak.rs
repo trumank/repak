@@ -1,7 +1,5 @@
 use super::ext::{ReadExt, WriteExt};
 use super::{Version, VersionMajor};
-#[cfg(feature = "encryption")]
-use aes::Aes256;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
@@ -9,20 +7,18 @@ use std::io::{self, Read, Seek, Write};
 #[derive(Debug)]
 pub struct PakReader {
     pak: Pak,
-    #[cfg(feature = "encryption")]
-    key: Option<aes::Aes256>,
+    key: super::Key,
 }
 
 #[derive(Debug)]
 pub struct PakWriter<W: Write + Seek> {
     pak: Pak,
     writer: W,
-    #[cfg(feature = "encryption")]
-    key: Option<aes::Aes256>,
+    key: super::Key,
 }
 
 #[derive(Debug)]
-pub struct Pak {
+pub(crate) struct Pak {
     version: Version,
     mount_point: String,
     index_offset: Option<u64>,
@@ -47,7 +43,7 @@ impl Pak {
 }
 
 #[derive(Debug, Default)]
-pub struct Index {
+pub(crate) struct Index {
     path_hash_seed: Option<u64>,
     entries: BTreeMap<String, super::entry::Entry>,
 }
@@ -74,8 +70,8 @@ impl Index {
 }
 
 #[cfg(feature = "encryption")]
-fn decrypt(key: Option<&aes::Aes256>, bytes: &mut [u8]) -> Result<(), super::Error> {
-    if let Some(key) = key {
+fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
+    if let super::Key::Some(key) = key {
         use aes::cipher::BlockDecrypt;
         for chunk in bytes.chunks_mut(16) {
             key.decrypt_block(aes::Block::from_mut_slice(chunk))
@@ -89,7 +85,7 @@ fn decrypt(key: Option<&aes::Aes256>, bytes: &mut [u8]) -> Result<(), super::Err
 impl PakReader {
     #[cfg(not(feature = "encryption"))]
     pub fn new_any<R: Read + Seek>(reader: &mut R) -> Result<Self, super::Error> {
-        Self::new_any_inner(reader)
+        Self::new_any_inner(reader, super::Key::None)
     }
 
     #[cfg(feature = "encryption")]
@@ -97,30 +93,19 @@ impl PakReader {
         reader: &mut R,
         key: Option<aes::Aes256>,
     ) -> Result<Self, super::Error> {
-        Self::new_any_inner(reader, key)
+        Self::new_any_inner(reader, key.into())
     }
 
     fn new_any_inner<R: Read + Seek>(
         reader: &mut R,
-        #[cfg(feature = "encryption")] key: Option<aes::Aes256>,
+        key: super::Key,
     ) -> Result<Self, super::Error> {
         use std::fmt::Write;
         let mut log = "\n".to_owned();
 
         for ver in Version::iter() {
-            match Pak::read(
-                &mut *reader,
-                ver,
-                #[cfg(feature = "encryption")]
-                key.as_ref(),
-            ) {
-                Ok(pak) => {
-                    return Ok(Self {
-                        pak,
-                        #[cfg(feature = "encryption")]
-                        key,
-                    })
-                }
+            match Pak::read(&mut *reader, ver, &key) {
+                Ok(pak) => return Ok(Self { pak, key }),
                 Err(err) => writeln!(log, "trying version {} failed: {}", ver, err)?,
             }
         }
@@ -141,25 +126,15 @@ impl PakReader {
         version: super::Version,
         key: Option<aes::Aes256>,
     ) -> Result<Self, super::Error> {
-        Self::new_inner(reader, version, key)
+        Self::new_inner(reader, version, key.into())
     }
 
     fn new_inner<R: Read + Seek>(
         reader: &mut R,
         version: super::Version,
-        #[cfg(feature = "encryption")] key: Option<aes::Aes256>,
+        key: super::Key,
     ) -> Result<Self, super::Error> {
-        Pak::read(
-            reader,
-            version,
-            #[cfg(feature = "encryption")]
-            key.as_ref(),
-        )
-        .map(|pak| Self {
-            pak,
-            #[cfg(feature = "encryption")]
-            key,
-        })
+        Pak::read(reader, version, &key).map(|pak| Self { pak, key })
     }
 
     pub fn version(&self) -> super::Version {
@@ -195,8 +170,7 @@ impl PakReader {
                 reader,
                 self.pak.version,
                 &self.pak.compression,
-                #[cfg(feature = "encryption")]
-                self.key.as_ref(),
+                &self.key,
                 writer,
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
@@ -214,7 +188,6 @@ impl PakReader {
         writer.seek(io::SeekFrom::Start(self.pak.index_offset.unwrap()))?;
         Ok(PakWriter {
             pak: self.pak,
-            #[cfg(feature = "encryption")]
             key: self.key,
             writer,
         })
@@ -232,6 +205,7 @@ impl<W: Write + Seek> PakWriter<W> {
         PakWriter {
             pak: Pak::new(version, mount_point, path_hash_seed),
             writer,
+            key: super::Key::None,
         }
     }
 
@@ -246,13 +220,13 @@ impl<W: Write + Seek> PakWriter<W> {
         PakWriter {
             pak: Pak::new(version, mount_point, path_hash_seed),
             writer,
-            key,
+            key: key.into(),
         }
     }
 
     fn new_inner(
         writer: W,
-        #[cfg(feature = "encryption")] key: Option<aes::Aes256>,
+        key: super::Key,
         version: Version,
         mount_point: String,
         path_hash_seed: Option<u64>,
@@ -260,7 +234,6 @@ impl<W: Write + Seek> PakWriter<W> {
         PakWriter {
             pak: Pak::new(version, mount_point, path_hash_seed),
             writer,
-            #[cfg(feature = "encryption")]
             key,
         }
     }
@@ -305,11 +278,7 @@ impl<W: Write + Seek> PakWriter<W> {
     }
 
     pub fn write_index(mut self) -> Result<W, super::Error> {
-        self.pak.write(
-            &mut self.writer,
-            #[cfg(feature = "encryption")]
-            self.key,
-        )?;
+        self.pak.write(&mut self.writer, &self.key)?;
         Ok(self.writer)
     }
 }
@@ -318,7 +287,7 @@ impl Pak {
     fn read<R: Read + Seek>(
         reader: &mut R,
         version: super::Version,
-        #[cfg(feature = "encryption")] key: Option<&aes::Aes256>,
+        key: &super::Key,
     ) -> Result<Self, super::Error> {
         // read footer to get index, encryption & compression info
         reader.seek(io::SeekFrom::End(-version.size()))?;
@@ -468,7 +437,7 @@ impl Pak {
     fn write<W: Write + Seek>(
         &self,
         writer: &mut W,
-        #[cfg(feature = "encryption")] _key: Option<aes::Aes256>,
+        _key: &super::Key,
     ) -> Result<(), super::Error> {
         let index_offset = writer.stream_position()?;
 
@@ -696,7 +665,7 @@ fn pad_zeros_to_alignment(v: &mut Vec<u8>, alignment: usize) {
 }
 
 #[cfg(feature = "encryption")]
-fn encrypt(key: Aes256, bytes: &mut [u8]) {
+fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
     use aes::cipher::BlockEncrypt;
     for chunk in bytes.chunks_mut(16) {
         key.encrypt_block(aes::Block::from_mut_slice(chunk))

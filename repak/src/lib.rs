@@ -122,3 +122,21 @@ pub enum Compression {
     Oodle,
     Zstd,
 }
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub(crate) enum Key {
+    #[cfg(feature = "encryption")]
+    Some(aes::Aes256),
+    None,
+}
+
+impl From<Option<aes::Aes256>> for Key {
+    fn from(value: Option<aes::Aes256>) -> Self {
+        match value {
+            #[cfg(feature = "encryption")]
+            Some(key) => Self::Some(key),
+            _ => Self::None,
+        }
+    }
+}
