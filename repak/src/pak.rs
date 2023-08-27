@@ -70,8 +70,8 @@ impl Index {
     }
 }
 
-fn decrypt(key: &Option<aes::Aes256>, bytes: &mut [u8]) -> Result<(), super::Error> {
-    if let Some(key) = &key {
+fn decrypt(key: Option<&aes::Aes256>, bytes: &mut [u8]) -> Result<(), super::Error> {
+    if let Some(key) = key {
         use aes::cipher::BlockDecrypt;
         for chunk in bytes.chunks_mut(16) {
             key.decrypt_block(aes::Block::from_mut_slice(chunk))
@@ -91,7 +91,7 @@ impl PakReader {
         let mut log = "\n".to_owned();
 
         for ver in Version::iter() {
-            match Pak::read(&mut *reader, ver, key.clone()) {
+            match Pak::read(&mut *reader, ver, key.as_ref()) {
                 Ok(pak) => {
                     return Ok(PakReader { pak, key });
                 }
@@ -225,7 +225,7 @@ impl Pak {
     fn read<R: Read + Seek>(
         mut reader: R,
         version: super::Version,
-        key: Option<aes::Aes256>,
+        key: Option<&aes::Aes256>,
     ) -> Result<Self, super::Error> {
         // read footer to get index, encryption & compression info
         reader.seek(io::SeekFrom::End(-version.size()))?;
@@ -236,7 +236,7 @@ impl Pak {
 
         // decrypt index if needed
         if footer.encrypted {
-            decrypt(&key, &mut index)?;
+            decrypt(key, &mut index)?;
         }
 
         let mut index = io::Cursor::new(index);
@@ -257,7 +257,7 @@ impl Pak {
                 // TODO verify hash
 
                 if footer.encrypted {
-                    decrypt(&key, &mut path_hash_index_buf)?;
+                    decrypt(key, &mut path_hash_index_buf)?;
                 }
 
                 let mut path_hash_index = vec![];
@@ -285,7 +285,7 @@ impl Pak {
                 // TODO verify hash
 
                 if footer.encrypted {
-                    decrypt(&key, &mut full_directory_index)?;
+                    decrypt(key, &mut full_directory_index)?;
                 }
                 let mut fdi = io::Cursor::new(full_directory_index);
 
