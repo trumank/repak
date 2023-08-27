@@ -316,6 +316,7 @@ impl Entry {
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
+        #[cfg(any(feature = "compression", feature = "oodle"))]
         let data_offset = reader.stream_position()?;
         #[allow(unused_mut)]
         let mut data = reader.read_len(match self.is_encrypted() {
@@ -338,6 +339,7 @@ impl Entry {
             }
         }
 
+        #[cfg(any(feature = "compression", feature = "oodle"))]
         let ranges = match &self.blocks {
             Some(blocks) => blocks
                 .iter()
