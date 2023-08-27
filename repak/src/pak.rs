@@ -92,16 +92,19 @@ impl PakReader {
 
         for ver in Version::iter() {
             match Pak::read(&mut *reader, ver, key.as_ref()) {
-                Ok(pak) => {
-                    return Ok(PakReader { pak, key });
-                }
-                Err(err) => {
-                    writeln!(log, "trying version {} failed: {}", ver, err)?;
-                    continue;
-                }
+                Ok(pak) => return Ok(Self { pak, key }),
+                Err(err) => writeln!(log, "trying version {} failed: {}", ver, err)?,
             }
         }
         Err(super::Error::UnsuportedOrEncrypted(log))
+    }
+
+    pub fn new<R: Read + Seek>(
+        reader: &mut R,
+        version: super::Version,
+        key: Option<aes::Aes256>,
+    ) -> Result<Self, super::Error> {
+        Pak::read(reader, version, key.as_ref()).map(|pak| Self { pak, key })
     }
 
     pub fn version(&self) -> super::Version {
