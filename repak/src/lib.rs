@@ -131,12 +131,9 @@ pub(crate) enum Key {
     None,
 }
 
-impl From<Option<aes::Aes256>> for Key {
-    fn from(value: Option<aes::Aes256>) -> Self {
-        match value {
-            #[cfg(feature = "encryption")]
-            Some(key) => Self::Some(key),
-            _ => Self::None,
-        }
+#[cfg(feature = "encryption")]
+impl From<aes::Aes256> for Key {
+    fn from(value: aes::Aes256) -> Self {
+        Self::Some(value)
     }
 }

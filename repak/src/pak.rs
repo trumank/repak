@@ -83,7 +83,6 @@ fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
 }
 
 impl PakReader {
-    #[cfg(not(feature = "encryption"))]
     pub fn new_any<R: Read + Seek>(reader: &mut R) -> Result<Self, super::Error> {
         Self::new_any_inner(reader, super::Key::None)
     }
@@ -91,9 +90,20 @@ impl PakReader {
     #[cfg(feature = "encryption")]
     pub fn new_any_with_key<R: Read + Seek>(
         reader: &mut R,
-        key: Option<aes::Aes256>,
+        key: aes::Aes256,
     ) -> Result<Self, super::Error> {
         Self::new_any_inner(reader, key.into())
+    }
+
+    #[cfg(feature = "encryption")]
+    pub fn new_any_with_optional_key<R: Read + Seek>(
+        reader: &mut R,
+        key: Option<aes::Aes256>,
+    ) -> Result<Self, super::Error> {
+        match key {
+            Some(key) => Self::new_any_with_key(reader, key),
+            None => Self::new_any(reader),
+        }
     }
 
     fn new_any_inner<R: Read + Seek>(
@@ -112,21 +122,32 @@ impl PakReader {
         Err(super::Error::UnsupportedOrEncrypted(log))
     }
 
-    #[cfg(not(feature = "encryption"))]
     pub fn new<R: Read + Seek>(
         reader: &mut R,
         version: super::Version,
     ) -> Result<Self, super::Error> {
-        Self::new_inner(reader, version)
+        Self::new_inner(reader, version, super::Key::None)
     }
 
     #[cfg(feature = "encryption")]
     pub fn new_with_key<R: Read + Seek>(
         reader: &mut R,
         version: super::Version,
-        key: Option<aes::Aes256>,
+        key: aes::Aes256,
     ) -> Result<Self, super::Error> {
         Self::new_inner(reader, version, key.into())
+    }
+
+    #[cfg(feature = "encryption")]
+    pub fn new_with_optional_key<R: Read + Seek>(
+        reader: &mut R,
+        version: super::Version,
+        key: Option<aes::Aes256>,
+    ) -> Result<Self, super::Error> {
+        match key {
+            Some(key) => Self::new_with_key(reader, version, key),
+            None => Self::new(reader, version),
+        }
     }
 
     fn new_inner<R: Read + Seek>(
@@ -195,7 +216,6 @@ impl PakReader {
 }
 
 impl<W: Write + Seek> PakWriter<W> {
-    #[cfg(not(feature = "encryption"))]
     pub fn new(
         writer: W,
         version: Version,
@@ -212,7 +232,7 @@ impl<W: Write + Seek> PakWriter<W> {
     #[cfg(feature = "encryption")]
     pub fn new_with_key(
         writer: W,
-        key: Option<aes::Aes256>,
+        key: aes::Aes256,
         version: Version,
         mount_point: String,
         path_hash_seed: Option<u64>,
@@ -221,6 +241,20 @@ impl<W: Write + Seek> PakWriter<W> {
             pak: Pak::new(version, mount_point, path_hash_seed),
             writer,
             key: key.into(),
+        }
+    }
+
+    #[cfg(feature = "encryption")]
+    pub fn new_with_optional_key(
+        writer: W,
+        key: Option<aes::Aes256>,
+        version: Version,
+        mount_point: String,
+        path_hash_seed: Option<u64>,
+    ) -> Self {
+        match key {
+            Some(key) => Self::new_with_key(writer, key, version, mount_point, path_hash_seed),
+            None => Self::new(writer, version, mount_point, path_hash_seed),
         }
     }
 
