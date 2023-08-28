@@ -7,6 +7,9 @@ mod pak;
 
 pub use {error::*, pak::*};
 
+#[cfg(all(feature = "oodle", not(target_os = "windows")))]
+compile_error!("Oodle compression only supported on Windows (or WINE)");
+
 pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[derive(
@@ -118,4 +121,19 @@ pub enum Compression {
     Gzip,
     Oodle,
     Zstd,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub(crate) enum Key {
+    #[cfg(feature = "encryption")]
+    Some(aes::Aes256),
+    None,
+}
+
+#[cfg(feature = "encryption")]
+impl From<aes::Aes256> for Key {
+    fn from(value: aes::Aes256) -> Self {
+        Self::Some(value)
+    }
 }

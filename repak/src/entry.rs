@@ -3,13 +3,13 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum EntryLocation {
+pub(crate) enum EntryLocation {
     Data,
     Index,
 }
 
 #[derive(Debug)]
-pub struct Block {
+pub(crate) struct Block {
     pub start: u64,
     pub end: u64,
 }
@@ -35,7 +35,7 @@ fn align(offset: u64) -> u64 {
 }
 
 #[derive(Debug)]
-pub struct Entry {
+pub(crate) struct Entry {
     pub offset: u64,
     pub compressed: u64,
     pub uncompressed: u64,
@@ -311,27 +311,35 @@ impl Entry {
         reader: &mut R,
         version: Version,
         compression: &[Compression],
-        key: Option<&aes::Aes256>,
+        #[allow(unused)] key: &super::Key,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
+        #[cfg(any(feature = "compression", feature = "oodle"))]
         let data_offset = reader.stream_position()?;
+        #[allow(unused_mut)]
         let mut data = reader.read_len(match self.is_encrypted() {
             true => align(self.compressed),
             false => self.compressed,
         } as usize)?;
         if self.is_encrypted() {
-            let Some(key) = key else {
-                return Err(super::Error::Encrypted);
-            };
-            use aes::cipher::BlockDecrypt;
-            for block in data.chunks_mut(16) {
-                key.decrypt_block(aes::Block::from_mut_slice(block))
+            #[cfg(not(feature = "encryption"))]
+            return Err(super::Error::Encryption);
+            #[cfg(feature = "encryption")]
+            {
+                let super::Key::Some(key) = key else {
+                    return Err(super::Error::Encrypted);
+                };
+                use aes::cipher::BlockDecrypt;
+                for block in data.chunks_mut(16) {
+                    key.decrypt_block(aes::Block::from_mut_slice(block))
+                }
+                data.truncate(self.compressed as usize);
             }
-            data.truncate(self.compressed as usize);
         }
 
+        #[cfg(any(feature = "compression", feature = "oodle"))]
         let ranges = match &self.blocks {
             Some(blocks) => blocks
                 .iter()
@@ -347,9 +355,11 @@ impl Entry {
                     },
                 )
                 .collect::<Vec<_>>(),
+            #[allow(clippy::single_range_in_vec_init)]
             None => vec![0..data.len()],
         };
 
+        #[cfg(feature = "compression")]
         macro_rules! decompress {
             ($decompressor: ty) => {
                 for range in ranges {
@@ -359,14 +369,18 @@ impl Entry {
         }
 
         match self.compression.map(|c| compression[c as usize]) {
-            None => buf.write_all(&data)?,
+            None | Some(Compression::None) => buf.write_all(&data)?,
+            #[cfg(feature = "compression")]
             Some(Compression::Zlib) => decompress!(flate2::read::ZlibDecoder<&[u8]>),
+            #[cfg(feature = "compression")]
             Some(Compression::Gzip) => decompress!(flate2::read::GzDecoder<&[u8]>),
+            #[cfg(feature = "compression")]
             Some(Compression::Zstd) => {
                 for range in ranges {
                     io::copy(&mut zstd::stream::read::Decoder::new(&data[range])?, buf)?;
                 }
             }
+            #[cfg(feature = "oodle")]
             Some(Compression::Oodle) => {
                 #[cfg(not(target_os = "windows"))]
                 return Err(super::Error::Oodle);
@@ -410,6 +424,7 @@ impl Entry {
                     */
 
                     #[allow(non_snake_case)]
+                    #[allow(clippy::type_complexity)]
                     let OodleLZ_Decompress: libloading::Symbol<
                         extern "C" fn(
                             compBuf: *mut u8,
@@ -472,18 +487,25 @@ impl Entry {
                     buf.write_all(&decompressed)?;
                 }
             }
-            _ => todo!(),
+            #[cfg(not(feature = "oodle"))]
+            Some(Compression::Oodle) => return Err(super::Error::Oodle),
+            #[cfg(not(feature = "compression"))]
+            _ => return Err(super::Error::Compression),
         }
         buf.flush()?;
         Ok(())
     }
 }
 
+#[cfg(feature = "oodle")]
 use once_cell::sync::Lazy;
+#[cfg(feature = "oodle")]
 static OODLE: Lazy<Result<libloading::Library, String>> =
     Lazy::new(|| get_oodle().map_err(|e| e.to_string()));
+#[cfg(feature = "oodle")]
 static OODLE_HASH: [u8; 20] = hex_literal::hex!("4bcc73614cb8fd2b0bce8d0f91ee5f3202d9d624");
 
+#[cfg(feature = "oodle")]
 fn get_oodle() -> Result<libloading::Library, super::Error> {
     use sha1::{Digest, Sha1};
 
