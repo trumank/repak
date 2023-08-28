@@ -1,3 +1,4 @@
+#![cfg(feature = "default")]
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use paste::paste;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};

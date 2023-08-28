@@ -321,7 +321,7 @@ impl Pak {
     fn read<R: Read + Seek>(
         reader: &mut R,
         version: super::Version,
-        key: &super::Key,
+        #[allow(unused)] key: &super::Key,
     ) -> Result<Self, super::Error> {
         // read footer to get index, encryption & compression info
         reader.seek(io::SeekFrom::End(-version.size()))?;

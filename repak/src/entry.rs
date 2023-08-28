@@ -311,7 +311,7 @@ impl Entry {
         reader: &mut R,
         version: Version,
         compression: &[Compression],
-        key: &super::Key,
+        #[allow(unused)] key: &super::Key,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
@@ -355,6 +355,7 @@ impl Entry {
                     },
                 )
                 .collect::<Vec<_>>(),
+            #[allow(clippy::single_range_in_vec_init)]
             None => vec![0..data.len()],
         };
 
