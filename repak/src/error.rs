@@ -16,7 +16,14 @@ pub enum Error {
     #[error("enable the encryption feature to read encrypted paks")]
     Encryption,
 
-    #[error("enable the oodle feature to read oodle paks")]
+    #[cfg_attr(
+        windows,
+        error("enable the oodle feature to read Oodle compressed paks")
+    )]
+    #[cfg_attr(
+        not(windows),
+        error("Oodle compression only supported on Windows (or WINE)")
+    )]
     Oodle,
 
     // std errors

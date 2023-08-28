@@ -29,3 +29,6 @@ hex = { workspace = true, optional = true }
 [dev-dependencies]
 base64 = { workspace = true }
 paste = "1.0.11"
+
+[package.metadata.cargo-all-features]
+denylist = ["oodle"]
