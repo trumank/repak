@@ -276,16 +276,13 @@ impl<W: Write + Seek> PakWriter<W> {
         self.writer
     }
 
-    pub fn write_file<R: Read>(&mut self, path: &str, reader: &mut R) -> Result<(), super::Error> {
-        let mut data = vec![];
-        reader.read_to_end(&mut data)?;
-
+    pub fn write_file(&mut self, path: &str, data: impl AsRef<[u8]>) -> Result<(), super::Error> {
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         hasher.update(&data);
 
         let offset = self.writer.stream_position()?;
-        let len = data.len() as u64;
+        let len = data.as_ref().len() as u64;
 
         let entry = super::entry::Entry {
             offset,
@@ -307,7 +304,7 @@ impl<W: Write + Seek> PakWriter<W> {
 
         self.pak.index.add_entry(path, entry);
 
-        self.writer.write_all(&data)?;
+        self.writer.write_all(data.as_ref())?;
         Ok(())
     }
 
