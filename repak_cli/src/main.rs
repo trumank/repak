@@ -438,7 +438,7 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         if args.verbose {
             progress.println(format!("packing {}", &rel));
         }
-        pak.write_file(rel, &mut BufReader::new(File::open(p)?))
+        pak.write_file(rel, std::fs::read(p)?)
     })?;
 
     pak.write_index()?;
