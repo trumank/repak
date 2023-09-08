@@ -7,7 +7,7 @@ mod pak;
 
 pub use {error::*, pak::*};
 
-pub const MAGIC: u32 = 0x5A6F12E1;
+pub const MAGIC: u32 = 0x6b2a56b8;
 
 #[cfg(feature = "oodle")]
 mod oodle {
@@ -96,7 +96,7 @@ impl Version {
             // additional compression name
             size += 32;
         }
-        size
+        size + 1
     }
 
     /// Losslessly convert full version into major version

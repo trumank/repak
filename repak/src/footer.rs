@@ -27,6 +27,7 @@ impl Footer {
         let magic = reader.read_u32::<LE>()?;
         let version_major =
             VersionMajor::from_repr(reader.read_u32::<LE>()?).unwrap_or(version.version_major());
+        reader.read_u8()?;
         let index_offset = reader.read_u64::<LE>()?;
         let index_size = reader.read_u64::<LE>()?;
         let hash = reader.read_guid()?;
@@ -89,6 +90,7 @@ impl Footer {
         }
         writer.write_u32::<LE>(self.magic)?;
         writer.write_u32::<LE>(self.version_major as u32)?;
+        writer.write_u8(0)?;
         writer.write_u64::<LE>(self.index_offset)?;
         writer.write_u64::<LE>(self.index_size)?;
         writer.write_all(&self.hash)?;
