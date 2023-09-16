@@ -7,7 +7,7 @@ mod pak;
 
 pub use {error::*, pak::*};
 
-pub const MAGIC: u32 = 0x5A6F12E1;
+pub const MAGIC: u32 = 0x18772;
 
 #[cfg(feature = "oodle")]
 mod oodle {

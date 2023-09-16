@@ -20,16 +20,16 @@ pub struct Footer {
 
 impl Footer {
     pub fn read<R: std::io::Read>(reader: &mut R, version: Version) -> Result<Self, super::Error> {
+        let version_major =
+            VersionMajor::from_repr(reader.read_u32::<LE>()?).unwrap_or(version.version_major());
+        let magic = reader.read_u32::<LE>()?;
         let encryption_uuid = (version.version_major() >= VersionMajor::EncryptionKeyGuid)
             .then_try(|| reader.read_u128::<LE>())?;
         let encrypted =
             version.version_major() >= VersionMajor::IndexEncryption && reader.read_bool()?;
-        let magic = reader.read_u32::<LE>()?;
-        let version_major =
-            VersionMajor::from_repr(reader.read_u32::<LE>()?).unwrap_or(version.version_major());
-        let index_offset = reader.read_u64::<LE>()?;
-        let index_size = reader.read_u64::<LE>()?;
         let hash = reader.read_guid()?;
+        let index_size = reader.read_u64::<LE>()?;
+        let index_offset = reader.read_u64::<LE>()?;
         let frozen = version.version_major() == VersionMajor::FrozenIndex && reader.read_bool()?;
         let compression = {
             let mut compression = Vec::with_capacity(match version {
@@ -81,17 +81,17 @@ impl Footer {
     }
 
     pub fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), super::Error> {
+        writer.write_u32::<LE>(self.version_major as u32)?;
+        writer.write_u32::<LE>(self.magic)?;
         if self.version_major >= VersionMajor::EncryptionKeyGuid {
             writer.write_u128::<LE>(0)?;
         }
         if self.version_major >= VersionMajor::IndexEncryption {
             writer.write_bool(self.encrypted)?;
         }
-        writer.write_u32::<LE>(self.magic)?;
-        writer.write_u32::<LE>(self.version_major as u32)?;
-        writer.write_u64::<LE>(self.index_offset)?;
-        writer.write_u64::<LE>(self.index_size)?;
         writer.write_all(&self.hash)?;
+        writer.write_u64::<LE>(self.index_size)?;
+        writer.write_u64::<LE>(self.index_offset)?;
         if self.version_major == VersionMajor::FrozenIndex {
             writer.write_bool(self.frozen)?;
         }

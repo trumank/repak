@@ -235,11 +235,11 @@ impl Entry {
         let hash = Some(reader.read_guid()?);
         let blocks = (ver >= VersionMajor::CompressionEncryption && compression.is_some())
             .then_try(|| reader.read_array(Block::read))?;
-        let flags = (ver >= VersionMajor::CompressionEncryption)
-            .then_try(|| reader.read_u8())?
-            .unwrap_or(0);
         let compression_block_size = (ver >= VersionMajor::CompressionEncryption)
             .then_try(|| reader.read_u32::<LE>())?
+            .unwrap_or(0);
+        let flags = (ver >= VersionMajor::CompressionEncryption)
+            .then_try(|| reader.read_u8())?
             .unwrap_or(0);
         Ok(Self {
             offset,
@@ -287,8 +287,8 @@ impl Entry {
                     block.write(writer)?;
                 }
             }
-            writer.write_u8(self.flags)?;
             writer.write_u32::<LE>(self.compression_block_size)?;
+            writer.write_u8(self.flags)?;
         }
 
         Ok(())
