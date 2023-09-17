@@ -43,10 +43,10 @@ struct ActionHashList {
 struct ActionUnpack {
     /// Input .pak path
     #[arg(index = 1)]
-    input: String,
+    input: Vec<String>,
 
     /// Output directory. Defaults to next to input pak
-    #[arg(index = 2)]
+    #[arg(short, long)]
     output: Option<String>,
 
     /// Prefix to strip from entry path
@@ -279,41 +279,47 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
 const STYLE: &str = "[{elapsed_precise}] [{wide_bar}] {pos}/{len} ({eta})";
 
 fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repak::Error> {
-    let pak = repak::PakReader::new_any_with_optional_key(
-        &mut BufReader::new(File::open(&action.input)?),
-        aes_key,
-    )?;
-    let output = action
-        .output
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(&action.input).with_extension(""));
-    match fs::create_dir(&output) {
-        Ok(_) => Ok(()),
-        Err(ref e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        Err(e) => Err(e),
-    }?;
-    if !action.force && output.read_dir()?.next().is_some() {
-        return Err(repak::Error::OutputNotEmpty(
-            output.to_string_lossy().to_string(),
-        ));
-    }
-    let mount_point = PathBuf::from(pak.mount_point());
-    let prefix = Path::new(&action.strip_prefix);
+    for input in &action.input {
+        let pak = repak::PakReader::new_any_with_optional_key(
+            &mut BufReader::new(File::open(input)?),
+            aes_key.clone(),
+        )?;
+        let output = action
+            .output
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| Path::new(input).with_extension(""));
+        match fs::create_dir(&output) {
+            Ok(_) => Ok(()),
+            Err(ref e)
+                if action.output.is_some() && e.kind() == std::io::ErrorKind::AlreadyExists =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }?;
+        if action.output.is_none() && !action.force && output.read_dir()?.next().is_some() {
+            return Err(repak::Error::OutputNotEmpty(
+                output.to_string_lossy().to_string(),
+            ));
+        }
+        let mount_point = PathBuf::from(pak.mount_point());
+        let prefix = Path::new(&action.strip_prefix);
 
-    let includes = action
-        .include
-        .iter()
-        .map(|i| prefix.join(Path::new(i)))
-        .collect::<Vec<_>>();
+        let includes = action
+            .include
+            .iter()
+            .map(|i| prefix.join(Path::new(i)))
+            .collect::<Vec<_>>();
 
-    struct UnpackEntry {
-        entry_path: String,
-        out_path: PathBuf,
-        out_dir: PathBuf,
-    }
+        struct UnpackEntry {
+            entry_path: String,
+            out_path: PathBuf,
+            out_dir: PathBuf,
+        }
 
-    let entries =
-        pak.files()
+        let entries = pak
+            .files()
             .into_iter()
             .map(|entry_path| {
                 let full_path = mount_point.join(&entry_path);
@@ -346,27 +352,33 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
             .filter_map(|e| e.transpose())
             .collect::<Result<Vec<_>, repak::Error>>()?;
 
-    let progress = indicatif::ProgressBar::new(entries.len() as u64)
-        .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
-    entries.par_iter().try_for_each_init(
-        || (progress.clone(), File::open(&action.input)),
-        |(progress, file), entry| -> Result<(), repak::Error> {
-            if action.verbose {
-                progress.println(format!("unpacking {}", entry.entry_path));
-            }
-            fs::create_dir_all(&entry.out_dir)?;
-            pak.read_file(
-                &entry.entry_path,
-                &mut BufReader::new(file.as_ref().unwrap()), // TODO: avoid this unwrap
-                &mut fs::File::create(&entry.out_path)?,
-            )?;
-            progress.inc(1);
-            Ok(())
-        },
-    )?;
-    progress.finish();
+        let progress = indicatif::ProgressBar::new(entries.len() as u64)
+            .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+        entries.par_iter().try_for_each_init(
+            || (progress.clone(), File::open(input)),
+            |(progress, file), entry| -> Result<(), repak::Error> {
+                if action.verbose {
+                    progress.println(format!("unpacking {}", entry.entry_path));
+                }
+                fs::create_dir_all(&entry.out_dir)?;
+                pak.read_file(
+                    &entry.entry_path,
+                    &mut BufReader::new(file.as_ref().unwrap()), // TODO: avoid this unwrap
+                    &mut fs::File::create(&entry.out_path)?,
+                )?;
+                progress.inc(1);
+                Ok(())
+            },
+        )?;
+        progress.finish();
 
-    println!("Unpacked {} files to {}", entries.len(), output.display());
+        println!(
+            "Unpacked {} files to {} from {}",
+            entries.len(),
+            output.display(),
+            input
+        );
+    }
 
     Ok(())
 }
