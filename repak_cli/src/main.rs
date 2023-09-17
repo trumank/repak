@@ -363,7 +363,10 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
                 fs::create_dir_all(&entry.out_dir)?;
                 pak.read_file(
                     &entry.entry_path,
-                    &mut BufReader::new(file.as_ref().unwrap()), // TODO: avoid this unwrap
+                    &mut BufReader::new(
+                        file.as_ref()
+                            .map_err(|e| repak::Error::Other(format!("error reading pak: {e}")))?,
+                    ),
                     &mut fs::File::create(&entry.out_path)?,
                 )?;
                 progress.inc(1);
