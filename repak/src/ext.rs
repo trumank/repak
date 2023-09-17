@@ -1,5 +1,15 @@
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
+pub trait BoolExt<T, E, F: FnOnce() -> Result<T, E>> {
+    fn then_try(&self, f: F) -> Result<Option<T>, E>;
+}
+
+impl<T, E, F: FnOnce() -> Result<T, E>> BoolExt<T, E, F> for bool {
+    fn then_try(&self, f: F) -> Result<Option<T>, E> {
+        self.then(f).transpose()
+    }
+}
+
 pub trait ReadExt {
     fn read_bool(&mut self) -> Result<bool, super::Error>;
     fn read_guid(&mut self) -> Result<[u8; 20], super::Error>;

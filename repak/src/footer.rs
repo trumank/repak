@@ -1,4 +1,4 @@
-use crate::ext::WriteExt;
+use crate::ext::{BoolExt, WriteExt};
 
 use super::{ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -20,58 +20,64 @@ pub struct Footer {
 
 impl Footer {
     pub fn read<R: std::io::Read>(reader: &mut R, version: Version) -> Result<Self, super::Error> {
-        let footer = Self {
-            encryption_uuid: match version.version_major() >= VersionMajor::EncryptionKeyGuid {
-                true => Some(reader.read_u128::<LE>()?),
-                false => None,
-            },
-            encrypted: version.version_major() >= VersionMajor::IndexEncryption
-                && reader.read_bool()?,
-            magic: reader.read_u32::<LE>()?,
-            version,
-            version_major: VersionMajor::from_repr(reader.read_u32::<LE>()?)
-                .unwrap_or(version.version_major()),
-            index_offset: reader.read_u64::<LE>()?,
-            index_size: reader.read_u64::<LE>()?,
-            hash: reader.read_guid()?,
-            frozen: version.version_major() == VersionMajor::FrozenIndex && reader.read_bool()?,
-            compression: {
-                let mut compression = Vec::with_capacity(match version {
-                    ver if ver < Version::V8A => 0,
-                    ver if ver < Version::V8B => 4,
-                    _ => 5,
-                });
-                for _ in 0..compression.capacity() {
-                    compression.push(
-                        Compression::from_str(
-                            &reader
-                                .read_len(32)?
-                                .iter()
-                                // filter out whitespace and convert to char
-                                .filter_map(|&ch| (ch != 0).then_some(ch as char))
-                                .collect::<String>(),
-                        )
-                        .unwrap_or_default(),
+        let encryption_uuid = (version.version_major() >= VersionMajor::EncryptionKeyGuid)
+            .then_try(|| reader.read_u128::<LE>())?;
+        let encrypted =
+            version.version_major() >= VersionMajor::IndexEncryption && reader.read_bool()?;
+        let magic = reader.read_u32::<LE>()?;
+        let version_major =
+            VersionMajor::from_repr(reader.read_u32::<LE>()?).unwrap_or(version.version_major());
+        let index_offset = reader.read_u64::<LE>()?;
+        let index_size = reader.read_u64::<LE>()?;
+        let hash = reader.read_guid()?;
+        let frozen = version.version_major() == VersionMajor::FrozenIndex && reader.read_bool()?;
+        let compression = {
+            let mut compression = Vec::with_capacity(match version {
+                ver if ver < Version::V8A => 0,
+                ver if ver < Version::V8B => 4,
+                _ => 5,
+            });
+            for _ in 0..compression.capacity() {
+                compression.push(
+                    Compression::from_str(
+                        &reader
+                            .read_len(32)?
+                            .iter()
+                            // filter out whitespace and convert to char
+                            .filter_map(|&ch| (ch != 0).then_some(ch as char))
+                            .collect::<String>(),
                     )
-                }
-                if version < Version::V8A {
-                    compression.push(Compression::Zlib);
-                    compression.push(Compression::Gzip);
-                    compression.push(Compression::Oodle);
-                }
-                compression
-            },
+                    .unwrap_or_default(),
+                )
+            }
+            if version < Version::V8A {
+                compression.push(Compression::Zlib);
+                compression.push(Compression::Gzip);
+                compression.push(Compression::Oodle);
+            }
+            compression
         };
-        if super::MAGIC != footer.magic {
-            return Err(super::Error::Magic(footer.magic));
+        if super::MAGIC != magic {
+            return Err(super::Error::Magic(magic));
         }
-        if version.version_major() != footer.version_major {
+        if version.version_major() != version_major {
             return Err(super::Error::Version {
                 used: version.version_major(),
-                version: footer.version_major,
+                version: version_major,
             });
         }
-        Ok(footer)
+        Ok(Self {
+            encryption_uuid,
+            encrypted,
+            magic,
+            version,
+            version_major,
+            index_offset,
+            index_size,
+            hash,
+            frozen,
+            compression,
+        })
     }
 
     pub fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), super::Error> {

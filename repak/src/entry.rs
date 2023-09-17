@@ -1,4 +1,4 @@
-use super::{ext::ReadExt, Compression, Version, VersionMajor};
+use super::{ext::BoolExt, ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
 
@@ -88,7 +88,7 @@ impl Entry {
         reader: &mut R,
         version: super::Version,
     ) -> Result<Self, super::Error> {
-        // since i need the compression flags, i have to store these as variables which is mildly annoying
+        let ver = version.version_major();
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
         let uncompressed = reader.read_u64::<LE>()?;
@@ -100,32 +100,26 @@ impl Entry {
             0 => None,
             n => Some(n - 1),
         };
+        let timestamp = (ver == VersionMajor::Initial).then_try(|| reader.read_u64::<LE>())?;
+        let hash = Some(reader.read_guid()?);
+        let blocks = (ver >= VersionMajor::CompressionEncryption && compression.is_some())
+            .then_try(|| reader.read_array(Block::read))?;
+        let flags = (ver >= VersionMajor::CompressionEncryption)
+            .then_try(|| reader.read_u8())?
+            .unwrap_or(0);
+        let compression_block_size = (ver >= VersionMajor::CompressionEncryption)
+            .then_try(|| reader.read_u32::<LE>())?
+            .unwrap_or(0);
         Ok(Self {
             offset,
             compressed,
             uncompressed,
             compression,
-            timestamp: match version.version_major() == VersionMajor::Initial {
-                true => Some(reader.read_u64::<LE>()?),
-                false => None,
-            },
-            hash: Some(reader.read_guid()?),
-            blocks: match version.version_major() >= VersionMajor::CompressionEncryption
-                && compression.is_some()
-            {
-                true => Some(reader.read_array(Block::read)?),
-                false => None,
-            },
-            flags: match version.version_major() >= VersionMajor::CompressionEncryption {
-                true => reader.read_u8()?,
-                false => 0,
-            },
-            compression_block_size: match version.version_major()
-                >= VersionMajor::CompressionEncryption
-            {
-                true => reader.read_u32::<LE>()?,
-                false => 0,
-            },
+            timestamp,
+            hash,
+            blocks,
+            flags,
+            compression_block_size,
         })
     }
 
