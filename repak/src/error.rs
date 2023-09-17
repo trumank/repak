@@ -62,7 +62,7 @@ pub enum Error {
     #[error("Prefix \"{prefix}\" does not match path \"{path}\"")]
     PrefixMismatch { prefix: String, path: String },
 
-    #[error("Attempted to write to \"{0}\" which outside of output directory")]
+    #[error("Attempted to write to \"{0}\" which is outside of output directory")]
     WriteOutsideOutput(String),
 
     #[error("Output directory is not empty: \"{0}\"")]
