@@ -454,15 +454,15 @@ fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
 
-    let full_path = mount_point.join(args.file);
+    let full_path = prefix.join(args.file);
     let file = full_path
-        .strip_prefix(prefix)
+        .strip_prefix(&mount_point)
         .map_err(|_| repak::Error::PrefixMismatch {
             path: full_path.to_string_lossy().to_string(),
-            prefix: prefix.to_string_lossy().to_string(),
+            prefix: mount_point.to_string_lossy().to_string(),
         })?;
 
     use std::io::Write;
-    std::io::stdout().write_all(&pak.get(&file.to_string_lossy(), &mut reader)?)?;
+    std::io::stdout().write_all(&pak.get(&file.to_slash_lossy(), &mut reader)?)?;
     Ok(())
 }
