@@ -307,6 +307,7 @@ impl Entry {
         compression: &[Compression],
         #[allow(unused)] key: &super::Key,
         buf: &mut W,
+        #[allow(unused)] oodle: super::Oodle,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
@@ -376,9 +377,9 @@ impl Entry {
             }
             #[cfg(feature = "oodle")]
             Some(Compression::Oodle) => unsafe {
-                // #[allow(non_snake_case)]
-                // #[allow(clippy::type_complexity)]
-                // let OodleLZ_Decompress = lib.get(b"OodleLZ_Decompress").unwrap();
+                let super::Oodle::Some(oodle) = oodle else {
+                    return Err(super::Error::OodleFailed);
+                };
                 let mut decompressed = vec![0; self.uncompressed as usize];
 
                 let mut compress_offset = 0;
@@ -392,7 +393,7 @@ impl Entry {
                             .min(self.uncompressed as usize - compress_offset)
                     };
                     let buffer = &mut data[range];
-                    let out = OodleLZ_Decompress(
+                    let out = oodle(
                         buffer.as_mut_ptr(),
                         buffer.len(),
                         decompressed.as_mut_ptr().offset(decompress_offset),
@@ -415,7 +416,7 @@ impl Entry {
                     decompress_offset += out as isize;
                 }
 
-                assert_eq!(
+                debug_assert_eq!(
                     decompress_offset, self.uncompressed as isize,
                     "Oodle decompression length mismatch"
                 );

@@ -151,3 +151,14 @@ impl From<aes::Aes256> for Key {
         Self::Some(value)
     }
 }
+
+#[cfg(feature = "oodle")]
+pub(crate) enum Oodle<'func> {
+    Some(&'func DECOMPRESS),
+    None,
+}
+
+#[cfg(not(feature = "oodle"))]
+pub(crate) enum Oodle {
+    None,
+}

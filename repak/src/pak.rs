@@ -180,6 +180,18 @@ impl PakReader {
         Ok(data)
     }
 
+    #[cfg(feature = "oodle")]
+    pub fn get_with_oodle<R: Read + Seek>(
+        &self,
+        path: &str,
+        reader: &mut R,
+        oodle: &super::DECOMPRESS,
+    ) -> Result<Vec<u8>, super::Error> {
+        let mut data = Vec::new();
+        self.read_file_with_oodle(path, reader, &mut data, oodle)?;
+        Ok(data)
+    }
+
     pub fn read_file<R: Read + Seek, W: Write>(
         &self,
         path: &str,
@@ -193,6 +205,28 @@ impl PakReader {
                 &self.pak.compression,
                 &self.key,
                 writer,
+                super::Oodle::None,
+            ),
+            None => Err(super::Error::MissingEntry(path.to_owned())),
+        }
+    }
+
+    #[cfg(feature = "oodle")]
+    pub fn read_file_with_oodle<R: Read + Seek, W: Write>(
+        &self,
+        path: &str,
+        reader: &mut R,
+        writer: &mut W,
+        oodle: &super::DECOMPRESS,
+    ) -> Result<(), super::Error> {
+        match self.pak.index.entries().get(path) {
+            Some(entry) => entry.read_file(
+                reader,
+                self.pak.version,
+                &self.pak.compression,
+                &self.key,
+                writer,
+                super::Oodle::Some(oodle),
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }
