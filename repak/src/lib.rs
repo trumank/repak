@@ -7,10 +7,24 @@ mod pak;
 
 pub use {error::*, pak::*};
 
-#[cfg(all(feature = "oodle", not(target_os = "windows")))]
-compile_error!("Oodle compression only supported on Windows (or WINE)");
-
 pub const MAGIC: u32 = 0x5A6F12E1;
+
+type DECOMPRESS = fn(
+    compBuf: *mut u8,
+    compBufSize: usize,
+    rawBuf: *mut u8,
+    rawLen: usize,
+    fuzzSafe: u32,
+    checkCRC: u32,
+    verbosity: u32,
+    decBufBase: u64,
+    decBufSize: usize,
+    fpCallback: u64,
+    callbackUserData: u64,
+    decoderMemory: *mut u8,
+    decoderMemorySize: usize,
+    threadPhase: u32,
+) -> i32;
 
 #[derive(
     Clone,

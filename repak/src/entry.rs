@@ -375,112 +375,52 @@ impl Entry {
                 }
             }
             #[cfg(feature = "oodle")]
-            Some(Compression::Oodle) => {
-                #[cfg(not(target_os = "windows"))]
-                return Err(super::Error::Oodle);
+            Some(Compression::Oodle) => unsafe {
+                // #[allow(non_snake_case)]
+                // #[allow(clippy::type_complexity)]
+                // let OodleLZ_Decompress = lib.get(b"OodleLZ_Decompress").unwrap();
+                let mut decompressed = vec![0; self.uncompressed as usize];
 
-                #[cfg(target_os = "windows")]
-                unsafe {
-                    use std::ops::Deref;
-                    let lib = match OODLE.deref() {
-                        Ok(lib) => Ok(lib),
-                        Err(e) => Err(super::Error::Other(e.to_string())),
-                    }?;
-
-                    /*
-                    let set_printf: libloading::Symbol<
-                        unsafe extern "C" fn(
-                            unsafe extern "C" fn(
-                                i32,
-                                *const std::ffi::c_char,
-                                i32,
-                                *const std::ffi::c_char,
-                                ...
-                            ) -> std::ffi::c_int,
-                        ),
-                    > = lib.get(b"OodleCore_Plugins_SetPrintf").unwrap();
-
-                    pub unsafe extern "C" fn printf(
-                        a: i32,
-                        b: *const std::ffi::c_char,
-                        c: i32,
-                        str: *const std::ffi::c_char,
-                        mut args: ...
-                    ) -> std::ffi::c_int {
-                        use printf_compat::{format, output};
-                        let mut s = String::new();
-                        let bytes_written = format(str, args.as_va_list(), output::fmt_write(&mut s));
-                        print!("[OODLE]: {}", s);
-                        bytes_written
-                    }
-
-                    set_printf(printf);
-                    */
-
-                    #[allow(non_snake_case)]
-                    #[allow(clippy::type_complexity)]
-                    let OodleLZ_Decompress: libloading::Symbol<
-                        extern "C" fn(
-                            compBuf: *mut u8,
-                            compBufSize: usize,
-                            rawBuf: *mut u8,
-                            rawLen: usize,
-                            fuzzSafe: u32,
-                            checkCRC: u32,
-                            verbosity: u32,
-                            decBufBase: u64,
-                            decBufSize: usize,
-                            fpCallback: u64,
-                            callbackUserData: u64,
-                            decoderMemory: *mut u8,
-                            decoderMemorySize: usize,
-                            threadPhase: u32,
-                        ) -> i32,
-                    > = lib.get(b"OodleLZ_Decompress").unwrap();
-
-                    let mut decompressed = vec![0; self.uncompressed as usize];
-
-                    let mut compress_offset = 0;
-                    let mut decompress_offset = 0;
-                    let block_count = ranges.len();
-                    for range in ranges {
-                        let decomp = if block_count == 1 {
-                            self.uncompressed as usize
-                        } else {
-                            (self.compression_block_size as usize)
-                                .min(self.uncompressed as usize - compress_offset)
-                        };
-                        let buffer = &mut data[range];
-                        let out = OodleLZ_Decompress(
-                            buffer.as_mut_ptr(),
-                            buffer.len(),
-                            decompressed.as_mut_ptr().offset(decompress_offset),
-                            decomp,
-                            1,
-                            1,
-                            0, //verbose 3
-                            0,
-                            0,
-                            0,
-                            0,
-                            std::ptr::null_mut(),
-                            0,
-                            3,
-                        );
-                        if out == 0 {
-                            return Err(super::Error::DecompressionFailed(Compression::Oodle));
-                        }
-                        compress_offset += self.compression_block_size as usize;
-                        decompress_offset += out as isize;
-                    }
-
-                    assert_eq!(
-                        decompress_offset, self.uncompressed as isize,
-                        "Oodle decompression length mismatch"
+                let mut compress_offset = 0;
+                let mut decompress_offset = 0;
+                let block_count = ranges.len();
+                for range in ranges {
+                    let decomp = if block_count == 1 {
+                        self.uncompressed as usize
+                    } else {
+                        (self.compression_block_size as usize)
+                            .min(self.uncompressed as usize - compress_offset)
+                    };
+                    let buffer = &mut data[range];
+                    let out = OodleLZ_Decompress(
+                        buffer.as_mut_ptr(),
+                        buffer.len(),
+                        decompressed.as_mut_ptr().offset(decompress_offset),
+                        decomp,
+                        1,
+                        1,
+                        0, //verbose 3
+                        0,
+                        0,
+                        0,
+                        0,
+                        std::ptr::null_mut(),
+                        0,
+                        3,
                     );
-                    buf.write_all(&decompressed)?;
+                    if out == 0 {
+                        return Err(super::Error::DecompressionFailed(Compression::Oodle));
+                    }
+                    compress_offset += self.compression_block_size as usize;
+                    decompress_offset += out as isize;
                 }
-            }
+
+                assert_eq!(
+                    decompress_offset, self.uncompressed as isize,
+                    "Oodle decompression length mismatch"
+                );
+                buf.write_all(&decompressed)?;
+            },
             #[cfg(not(feature = "oodle"))]
             Some(Compression::Oodle) => return Err(super::Error::Oodle),
             #[cfg(not(feature = "compression"))]
@@ -489,42 +429,6 @@ impl Entry {
         buf.flush()?;
         Ok(())
     }
-}
-
-#[cfg(feature = "oodle")]
-use once_cell::sync::Lazy;
-#[cfg(feature = "oodle")]
-static OODLE: Lazy<Result<libloading::Library, String>> =
-    Lazy::new(|| get_oodle().map_err(|e| e.to_string()));
-#[cfg(feature = "oodle")]
-static OODLE_HASH: [u8; 20] = hex_literal::hex!("4bcc73614cb8fd2b0bce8d0f91ee5f3202d9d624");
-
-#[cfg(feature = "oodle")]
-fn get_oodle() -> Result<libloading::Library, super::Error> {
-    use sha1::{Digest, Sha1};
-
-    let oodle = std::env::current_exe()?.with_file_name("oo2core_9_win64.dll");
-    if !oodle.exists() {
-        let mut data = vec![];
-        ureq::get("https://cdn.discordapp.com/attachments/817251677086285848/992648087371792404/oo2core_9_win64.dll")
-            .call().map_err(Box::new)?
-            .into_reader().read_to_end(&mut data)?;
-
-        std::fs::write(&oodle, data)?;
-    }
-
-    let mut hasher = Sha1::new();
-    hasher.update(std::fs::read(&oodle)?);
-    let hash = hasher.finalize();
-    (hash[..] == OODLE_HASH).then_some(()).ok_or_else(|| {
-        super::Error::Other(format!(
-            "oodle hash mismatch expected: {} got: {} ",
-            hex::encode(OODLE_HASH),
-            hex::encode(hash)
-        ))
-    })?;
-
-    unsafe { libloading::Library::new(oodle) }.map_err(|_| super::Error::OodleFailed)
 }
 
 mod test {
