@@ -177,7 +177,7 @@ fn main() -> Result<(), repak::Error> {
 fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
     if let Some(aes_key) = aes_key {
-        builder.key(aes_key);
+        builder = builder.key(aes_key);
     }
     let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
     println!("mount point: {}", pak.mount_point());
@@ -192,7 +192,7 @@ fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::E
 fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
     if let Some(aes_key) = aes_key {
-        builder.key(aes_key);
+        builder = builder.key(aes_key);
     }
     let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
 
@@ -225,7 +225,7 @@ fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::E
 fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
     if let Some(aes_key) = aes_key {
-        builder.key(aes_key);
+        builder = builder.key(aes_key);
     }
     let pak = builder.reader(&mut BufReader::new(File::open(&action.input)?))?;
 
@@ -284,9 +284,11 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
     for input in &action.input {
         let mut builder = repak::PakBuilder::new();
         #[cfg(windows)]
-        builder.oodle(get_oodle::decompress);
+        {
+            builder = builder.oodle(get_oodle::decompress);
+        }
         if let Some(aes_key) = aes_key.clone() {
-            builder.key(aes_key);
+            builder = builder.key(aes_key);
         }
         let pak = builder.reader(&mut BufReader::new(File::open(input)?))?;
         let output = action
@@ -457,9 +459,11 @@ fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error
     let mut reader = BufReader::new(File::open(&args.input)?);
     let mut builder = repak::PakBuilder::new();
     #[cfg(windows)]
-    builder.oodle(get_oodle::decompress);
+    {
+        builder = builder.oodle(get_oodle::decompress);
+    }
     if let Some(aes_key) = aes_key {
-        builder.key(aes_key);
+        builder = builder.key(aes_key);
     }
     let pak = builder.reader(&mut reader)?;
     let mount_point = PathBuf::from(pak.mount_point());

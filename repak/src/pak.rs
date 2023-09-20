@@ -16,12 +16,12 @@ impl PakBuilder {
         }
     }
     #[cfg(feature = "encryption")]
-    pub fn key(&mut self, key: aes::Aes256) -> &mut Self {
+    pub fn key(mut self, key: aes::Aes256) -> Self {
         self.key = super::Key::Some(key);
         self
     }
     #[cfg(feature = "oodle")]
-    pub fn oodle(&mut self, oodle: fn() -> super::Decompress) -> &mut Self {
+    pub fn oodle(self, oodle: fn() -> super::Decompress) -> Self {
         unsafe { super::OODLE = Some(once_cell::sync::Lazy::new(oodle)) }
         self
     }
