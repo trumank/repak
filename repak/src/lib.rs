@@ -10,7 +10,7 @@ pub use {error::*, pak::*};
 pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[cfg(feature = "oodle")]
-pub type DECOMPRESS = fn(
+pub type DECOMPRESS = unsafe extern "C" fn(
     compBuf: *mut u8,
     compBufSize: usize,
     rawBuf: *mut u8,
