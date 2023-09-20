@@ -16,12 +16,14 @@ impl PakBuilder {
         }
     }
     #[cfg(feature = "encryption")]
-    pub fn key(&mut self, key: aes::Aes256) {
-        self.key = super::Key::Some(key)
+    pub fn key(&mut self, key: aes::Aes256) -> &mut Self {
+        self.key = super::Key::Some(key);
+        self
     }
     #[cfg(feature = "oodle")]
-    pub fn oodle(&mut self, oodle: fn() -> super::Decompress) {
+    pub fn oodle(&mut self, oodle: fn() -> super::Decompress) -> &mut Self {
         unsafe { super::OODLE = Some(once_cell::sync::Lazy::new(oodle)) }
+        self
     }
     pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
         PakReader::new_any_inner(reader, self.key)
