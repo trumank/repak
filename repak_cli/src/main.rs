@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};
+#[cfg(windows)]
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use clap::builder::TypedValueParser;
@@ -248,12 +250,8 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
 
     let hashes: std::sync::Arc<std::sync::Mutex<BTreeMap<std::borrow::Cow<'_, str>, Vec<u8>>>> =
         Default::default();
-    use std::ops::Deref;
-    let lib = match OODLE.deref() {
-        Ok(lib) => lib,
-        Err(e) => return Err(repak::Error::Other(e.clone())),
-    };
-    let oodle_decompress = unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap();
+    #[cfg(windows)]
+    let oodle_decompress = decompress()?;
 
     full_paths.par_iter().zip(stripped).try_for_each_init(
         || (hashes.clone(), File::open(&action.input)),
@@ -261,6 +259,13 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
             use sha2::Digest;
 
             let mut hasher = sha2::Sha256::new();
+            #[cfg(not(windows))]
+            pak.read_file(
+                path,
+                &mut BufReader::new(file.as_ref().unwrap()),
+                &mut hasher,
+            )?;
+            #[cfg(windows)]
             pak.read_file_with_oodle(
                 path,
                 &mut BufReader::new(file.as_ref().unwrap()),
@@ -361,12 +366,9 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
 
         let progress = indicatif::ProgressBar::new(entries.len() as u64)
             .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
-        use std::ops::Deref;
-        let lib = match OODLE.deref() {
-            Ok(lib) => lib,
-            Err(e) => return Err(repak::Error::Other(e.clone())),
-        };
-        let decompress = unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap();
+
+        #[cfg(windows)]
+        let oodle_decompress = decompress()?;
         entries.par_iter().try_for_each_init(
             || (progress.clone(), File::open(input)),
             |(progress, file), entry| -> Result<(), repak::Error> {
@@ -374,6 +376,16 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
                     progress.println(format!("unpacking {}", entry.entry_path));
                 }
                 fs::create_dir_all(&entry.out_dir)?;
+                #[cfg(not(windows))]
+                pak.read_file(
+                    &entry.entry_path,
+                    &mut BufReader::new(
+                        file.as_ref()
+                            .map_err(|e| repak::Error::Other(format!("error reading pak: {e}")))?,
+                    ),
+                    &mut fs::File::create(&entry.out_path)?,
+                )?;
+                #[cfg(windows)]
                 pak.read_file_with_oodle(
                     &entry.entry_path,
                     &mut BufReader::new(
@@ -381,7 +393,7 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
                             .map_err(|e| repak::Error::Other(format!("error reading pak: {e}")))?,
                     ),
                     &mut fs::File::create(&entry.out_path)?,
-                    &decompress,
+                    &oodle_decompress,
                 )?;
                 progress.inc(1);
                 Ok(())
@@ -477,17 +489,22 @@ fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error
         })?;
 
     use std::io::Write;
-    use std::ops::Deref;
+    std::io::stdout().write_all(
+        #[cfg(not(windows))]
+        &pak.get(&file.to_slash_lossy(), &mut reader)?,
+        #[cfg(windows)]
+        &pak.get_with_oodle(&file.to_slash_lossy(), &mut reader, decompress()?.deref())?,
+    )?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn decompress<'func>() -> Result<libloading::Symbol<'func, repak::DECOMPRESS>, repak::Error> {
     let lib = match OODLE.deref() {
         Ok(lib) => lib,
         Err(e) => return Err(repak::Error::Other(e.clone())),
     };
-    std::io::stdout().write_all(&pak.get_with_oodle(
-        &file.to_slash_lossy(),
-        &mut reader,
-        &unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap(),
-    )?)?;
-    Ok(())
+    Ok(unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap())
 }
 
 #[cfg(windows)]
