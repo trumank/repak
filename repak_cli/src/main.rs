@@ -118,7 +118,7 @@ enum Action {
     Info(ActionInfo),
     /// List .pak files
     List(ActionList),
-    /// List .pka files and the SHA256 of their contents. Useful for finding differences between paks
+    /// List .pak files and the SHA256 of their contents. Useful for finding differences between paks
     HashList(ActionHashList),
     /// Unpack .pak file
     Unpack(ActionUnpack),
@@ -248,6 +248,12 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
 
     let hashes: std::sync::Arc<std::sync::Mutex<BTreeMap<std::borrow::Cow<'_, str>, Vec<u8>>>> =
         Default::default();
+    use std::ops::Deref;
+    let lib = match OODLE.deref() {
+        Ok(lib) => lib,
+        Err(e) => return Err(repak::Error::Other(e.clone())),
+    };
+    let oodle_decompress = unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap();
 
     full_paths.par_iter().zip(stripped).try_for_each_init(
         || (hashes.clone(), File::open(&action.input)),
@@ -255,10 +261,11 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
             use sha2::Digest;
 
             let mut hasher = sha2::Sha256::new();
-            pak.read_file(
+            pak.read_file_with_oodle(
                 path,
                 &mut BufReader::new(file.as_ref().unwrap()),
                 &mut hasher,
+                &oodle_decompress,
             )?;
             let hash = hasher.finalize();
             hashes
@@ -354,6 +361,12 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
 
         let progress = indicatif::ProgressBar::new(entries.len() as u64)
             .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+        use std::ops::Deref;
+        let lib = match OODLE.deref() {
+            Ok(lib) => lib,
+            Err(e) => return Err(repak::Error::Other(e.clone())),
+        };
+        let decompress = unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap();
         entries.par_iter().try_for_each_init(
             || (progress.clone(), File::open(input)),
             |(progress, file), entry| -> Result<(), repak::Error> {
@@ -361,13 +374,14 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
                     progress.println(format!("unpacking {}", entry.entry_path));
                 }
                 fs::create_dir_all(&entry.out_dir)?;
-                pak.read_file(
+                pak.read_file_with_oodle(
                     &entry.entry_path,
                     &mut BufReader::new(
                         file.as_ref()
                             .map_err(|e| repak::Error::Other(format!("error reading pak: {e}")))?,
                     ),
                     &mut fs::File::create(&entry.out_path)?,
+                    &decompress,
                 )?;
                 progress.inc(1);
                 Ok(())
@@ -463,6 +477,51 @@ fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error
         })?;
 
     use std::io::Write;
-    std::io::stdout().write_all(&pak.get(&file.to_slash_lossy(), &mut reader)?)?;
+    use std::ops::Deref;
+    let lib = match OODLE.deref() {
+        Ok(lib) => lib,
+        Err(e) => return Err(repak::Error::Other(e.clone())),
+    };
+    std::io::stdout().write_all(&pak.get_with_oodle(
+        &file.to_slash_lossy(),
+        &mut reader,
+        &unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap(),
+    )?)?;
     Ok(())
+}
+
+#[cfg(windows)]
+use once_cell::sync::Lazy;
+#[cfg(windows)]
+static OODLE: Lazy<Result<libloading::Library, String>> =
+    Lazy::new(|| get_oodle().map_err(|e| e.to_string()));
+#[cfg(windows)]
+static OODLE_HASH: [u8; 20] = hex_literal::hex!("4bcc73614cb8fd2b0bce8d0f91ee5f3202d9d624");
+
+#[cfg(windows)]
+fn get_oodle() -> Result<libloading::Library, repak::Error> {
+    use sha1::{Digest, Sha1};
+
+    let oodle = std::env::current_exe()?.with_file_name("oo2core_9_win64.dll");
+    if !oodle.exists() {
+        let mut data = vec![];
+        ureq::get("https://cdn.discordapp.com/attachments/817251677086285848/992648087371792404/oo2core_9_win64.dll")
+            .call().map_err(|e| repak::Error::Other(e.to_string()))?
+            .into_reader().read_to_end(&mut data)?;
+
+        std::fs::write(&oodle, data)?;
+    }
+
+    let mut hasher = Sha1::new();
+    hasher.update(std::fs::read(&oodle)?);
+    let hash = hasher.finalize();
+    (hash[..] == OODLE_HASH).then_some(()).ok_or_else(|| {
+        repak::Error::Other(format!(
+            "oodle hash mismatch expected: {} got: {} ",
+            hex::encode(OODLE_HASH),
+            hex::encode(hash)
+        ))
+    })?;
+
+    unsafe { libloading::Library::new(oodle) }.map_err(|_| repak::Error::OodleFailed)
 }
