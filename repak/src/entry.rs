@@ -307,7 +307,6 @@ impl Entry {
         compression: &[Compression],
         #[allow(unused)] key: &super::Key,
         buf: &mut W,
-        #[allow(unused)] oodle: super::Oodle,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
@@ -377,7 +376,7 @@ impl Entry {
             }
             #[cfg(feature = "oodle")]
             Some(Compression::Oodle) => unsafe {
-                let super::Oodle::Some(oodle) = oodle else {
+                let Some(ref oodle) = super::OODLE else {
                     return Err(super::Error::OodleFailed);
                 };
                 let mut decompressed = vec![0; self.uncompressed as usize];

@@ -10,7 +10,10 @@ pub use {error::*, pak::*};
 pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[cfg(feature = "oodle")]
-pub type DECOMPRESS = unsafe extern "C" fn(
+static mut OODLE: Option<once_cell::sync::Lazy<Decompress>> = None;
+
+#[cfg(feature = "oodle")]
+pub type Decompress = unsafe extern "C" fn(
     compBuf: *mut u8,
     compBufSize: usize,
     rawBuf: *mut u8,
@@ -155,7 +158,7 @@ impl From<aes::Aes256> for Key {
 
 #[cfg(feature = "oodle")]
 pub(crate) enum Oodle<'func> {
-    Some(&'func DECOMPRESS),
+    Some(&'func Decompress),
     None,
 }
 

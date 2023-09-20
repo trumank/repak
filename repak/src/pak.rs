@@ -5,6 +5,46 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
 
 #[derive(Debug)]
+pub struct PakBuilder {
+    key: super::Key,
+}
+
+impl PakBuilder {
+    pub fn new() -> Self {
+        Self {
+            key: super::Key::None,
+        }
+    }
+    #[cfg(feature = "encryption")]
+    pub fn key(&mut self, key: aes::Aes256) {
+        self.key = super::Key::Some(key)
+    }
+    #[cfg(feature = "oodle")]
+    pub fn oodle(&mut self, oodle: fn() -> super::Decompress) {
+        unsafe { super::OODLE = Some(once_cell::sync::Lazy::new(oodle)) }
+    }
+    pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
+        PakReader::new_any_inner(reader, self.key)
+    }
+    pub fn reader_with_version<R: Read + Seek>(
+        self,
+        reader: &mut R,
+        version: super::Version,
+    ) -> Result<PakReader, super::Error> {
+        PakReader::new_inner(reader, version, self.key)
+    }
+    pub fn writer<W: Write + Seek>(
+        self,
+        writer: W,
+        version: super::Version,
+        mount_point: String,
+        path_hash_seed: Option<u64>,
+    ) -> PakWriter<W> {
+        PakWriter::new_inner(writer, self.key, version, mount_point, path_hash_seed)
+    }
+}
+
+#[derive(Debug)]
 pub struct PakReader {
     pak: Pak,
     key: super::Key,
@@ -83,29 +123,6 @@ fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
 }
 
 impl PakReader {
-    pub fn new_any<R: Read + Seek>(reader: &mut R) -> Result<Self, super::Error> {
-        Self::new_any_inner(reader, super::Key::None)
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_any_with_key<R: Read + Seek>(
-        reader: &mut R,
-        key: aes::Aes256,
-    ) -> Result<Self, super::Error> {
-        Self::new_any_inner(reader, key.into())
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_any_with_optional_key<R: Read + Seek>(
-        reader: &mut R,
-        key: Option<aes::Aes256>,
-    ) -> Result<Self, super::Error> {
-        match key {
-            Some(key) => Self::new_any_with_key(reader, key),
-            None => Self::new_any(reader),
-        }
-    }
-
     fn new_any_inner<R: Read + Seek>(
         reader: &mut R,
         key: super::Key,
@@ -120,34 +137,6 @@ impl PakReader {
             }
         }
         Err(super::Error::UnsupportedOrEncrypted(log))
-    }
-
-    pub fn new<R: Read + Seek>(
-        reader: &mut R,
-        version: super::Version,
-    ) -> Result<Self, super::Error> {
-        Self::new_inner(reader, version, super::Key::None)
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_key<R: Read + Seek>(
-        reader: &mut R,
-        version: super::Version,
-        key: aes::Aes256,
-    ) -> Result<Self, super::Error> {
-        Self::new_inner(reader, version, key.into())
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_optional_key<R: Read + Seek>(
-        reader: &mut R,
-        version: super::Version,
-        key: Option<aes::Aes256>,
-    ) -> Result<Self, super::Error> {
-        match key {
-            Some(key) => Self::new_with_key(reader, version, key),
-            None => Self::new(reader, version),
-        }
     }
 
     fn new_inner<R: Read + Seek>(
@@ -180,18 +169,6 @@ impl PakReader {
         Ok(data)
     }
 
-    #[cfg(feature = "oodle")]
-    pub fn get_with_oodle<R: Read + Seek>(
-        &self,
-        path: &str,
-        reader: &mut R,
-        oodle: &super::DECOMPRESS,
-    ) -> Result<Vec<u8>, super::Error> {
-        let mut data = Vec::new();
-        self.read_file_with_oodle(path, reader, &mut data, oodle)?;
-        Ok(data)
-    }
-
     pub fn read_file<R: Read + Seek, W: Write>(
         &self,
         path: &str,
@@ -205,28 +182,6 @@ impl PakReader {
                 &self.pak.compression,
                 &self.key,
                 writer,
-                super::Oodle::None,
-            ),
-            None => Err(super::Error::MissingEntry(path.to_owned())),
-        }
-    }
-
-    #[cfg(feature = "oodle")]
-    pub fn read_file_with_oodle<R: Read + Seek, W: Write>(
-        &self,
-        path: &str,
-        reader: &mut R,
-        writer: &mut W,
-        oodle: &super::DECOMPRESS,
-    ) -> Result<(), super::Error> {
-        match self.pak.index.entries().get(path) {
-            Some(entry) => entry.read_file(
-                reader,
-                self.pak.version,
-                &self.pak.compression,
-                &self.key,
-                writer,
-                super::Oodle::Some(oodle),
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }
@@ -250,48 +205,6 @@ impl PakReader {
 }
 
 impl<W: Write + Seek> PakWriter<W> {
-    pub fn new(
-        writer: W,
-        version: Version,
-        mount_point: String,
-        path_hash_seed: Option<u64>,
-    ) -> Self {
-        PakWriter {
-            pak: Pak::new(version, mount_point, path_hash_seed),
-            writer,
-            key: super::Key::None,
-        }
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_key(
-        writer: W,
-        key: aes::Aes256,
-        version: Version,
-        mount_point: String,
-        path_hash_seed: Option<u64>,
-    ) -> Self {
-        PakWriter {
-            pak: Pak::new(version, mount_point, path_hash_seed),
-            writer,
-            key: key.into(),
-        }
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_optional_key(
-        writer: W,
-        key: Option<aes::Aes256>,
-        version: Version,
-        mount_point: String,
-        path_hash_seed: Option<u64>,
-    ) -> Self {
-        match key {
-            Some(key) => Self::new_with_key(writer, key, version, mount_point, path_hash_seed),
-            None => Self::new(writer, version, mount_point, path_hash_seed),
-        }
-    }
-
     fn new_inner(
         writer: W,
         key: super::Key,
