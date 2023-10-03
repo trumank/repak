@@ -10,14 +10,9 @@ edition.workspace = true
 name = "repak"
 path = "src/main.rs"
 
-[target.'cfg(windows)'.dependencies]
-repak = { path = "../repak", features = ["oodle"] }
-
-[target.'cfg(not(windows))'.dependencies]
-repak = { path = "../repak" }
-
 [dependencies]
 get_oodle = { path = "../get_oodle" }
+repak = { path = "../repak", features = ["oodle"] }
 aes = { workspace = true }
 base64 = { workspace = true }
 clap = { version = "4.1.4", features = ["derive"] }

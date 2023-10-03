@@ -282,11 +282,7 @@ const STYLE: &str = "[{elapsed_precise}] [{wide_bar}] {pos}/{len} ({eta})";
 
 fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repak::Error> {
     for input in &action.input {
-        let mut builder = repak::PakBuilder::new();
-        #[cfg(windows)]
-        {
-            builder = builder.oodle(get_oodle::decompress);
-        }
+        let mut builder = repak::PakBuilder::new().oodle(get_oodle::decompress);
         if let Some(aes_key) = aes_key.clone() {
             builder = builder.key(aes_key);
         }
@@ -457,11 +453,7 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
 
 fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error> {
     let mut reader = BufReader::new(File::open(&args.input)?);
-    let mut builder = repak::PakBuilder::new();
-    #[cfg(windows)]
-    {
-        builder = builder.oodle(get_oodle::decompress);
-    }
+    let mut builder = repak::PakBuilder::new().oodle(get_oodle::decompress);
     if let Some(aes_key) = aes_key {
         builder = builder.key(aes_key);
     }

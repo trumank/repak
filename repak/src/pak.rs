@@ -21,7 +21,7 @@ impl PakBuilder {
         self
     }
     #[cfg(feature = "oodle")]
-    pub fn oodle(self, oodle: fn() -> super::Decompress) -> Self {
+    pub fn oodle(self, oodle: fn() -> super::OodleDecompress) -> Self {
         unsafe { super::OODLE = Some(once_cell::sync::Lazy::new(oodle)) }
         self
     }

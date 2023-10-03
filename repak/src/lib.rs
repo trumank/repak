@@ -10,25 +10,10 @@ pub use {error::*, pak::*};
 pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[cfg(feature = "oodle")]
-static mut OODLE: Option<once_cell::sync::Lazy<Decompress>> = None;
+static mut OODLE: Option<once_cell::sync::Lazy<OodleDecompress>> = None;
 
 #[cfg(feature = "oodle")]
-pub type Decompress = unsafe extern "C" fn(
-    compBuf: *mut u8,
-    compBufSize: usize,
-    rawBuf: *mut u8,
-    rawLen: usize,
-    fuzzSafe: u32,
-    checkCRC: u32,
-    verbosity: u32,
-    decBufBase: u64,
-    decBufSize: usize,
-    fpCallback: u64,
-    callbackUserData: u64,
-    decoderMemory: *mut u8,
-    decoderMemorySize: usize,
-    threadPhase: u32,
-) -> i32;
+type OodleDecompress = fn(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32;
 
 #[derive(
     Clone,
@@ -158,7 +143,7 @@ impl From<aes::Aes256> for Key {
 
 #[cfg(feature = "oodle")]
 pub(crate) enum Oodle<'func> {
-    Some(&'func Decompress),
+    Some(&'func OodleDecompress),
     None,
 }
 

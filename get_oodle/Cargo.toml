@@ -6,11 +6,18 @@ license.workspace = true
 version.workspace = true
 edition.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+libloading = "0.7"
+
+[target.'cfg(unix)'.dependencies]
+object = { version = "0.32.1", default-features = false, features = ["std", "read"] }
+libc = "0.2.148"
+seq-macro = "0.3.5"
+
 [dependencies]
-repak = { path = "../repak", features = ["oodle"] }
 sha1 = { workspace = true }
 ureq = "2.6"
-once_cell = "1.17"
 hex-literal = "0.4"
-libloading = "0.7"
 hex = { workspace = true }
+anyhow = "1.0.75"
+lzma-rs = "0.3.0"

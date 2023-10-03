@@ -393,30 +393,18 @@ impl Entry {
                     };
                     let buffer = &mut data[range];
                     let out = oodle(
-                        buffer.as_mut_ptr(),
-                        buffer.len(),
-                        decompressed.as_mut_ptr().offset(decompress_offset),
-                        decomp,
-                        1,
-                        1,
-                        0, //verbose 3
-                        0,
-                        0,
-                        0,
-                        0,
-                        std::ptr::null_mut(),
-                        0,
-                        3,
+                        buffer,
+                        &mut decompressed[decompress_offset..decompress_offset + decomp],
                     );
                     if out == 0 {
                         return Err(super::Error::DecompressionFailed(Compression::Oodle));
                     }
                     compress_offset += self.compression_block_size as usize;
-                    decompress_offset += out as isize;
+                    decompress_offset += out as usize;
                 }
 
                 debug_assert_eq!(
-                    decompress_offset, self.uncompressed as isize,
+                    decompress_offset, self.uncompressed as usize,
                     "Oodle decompression length mismatch"
                 );
                 buf.write_all(&decompressed)?;
