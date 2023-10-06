@@ -12,6 +12,25 @@ Library and CLI tool for working with Unreal Engine .pak files.
  - 2x faster unpacking over `UnrealPak`. As much as 30x faster has been observed (on Linux unpacked to ramdisk)
  - Unpacking is guarded against malicious pak that attempt to write to parent directories
 
+## cli
+```
+Usage: repak [OPTIONS] <COMMAND>
+
+Commands:
+  info       Print .pak info
+  list       List .pak files
+  hash-list  List .pka files and the SHA256 of their contents. Useful for finding differences between paks
+  unpack     Unpack .pak file
+  pack       Pack directory into .pak file
+  get        Reads a single file to stdout
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -a, --aes-key <AES_KEY>  256 bit AES encryption key as base64 or hex string if the pak is encrypted
+  -h, --help               Print help
+  -V, --version            Print version
+```
+
 ## compatibility
 
 | UE Version | Version | Version Feature       | Read               | Write              |
