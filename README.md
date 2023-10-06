@@ -13,7 +13,8 @@ Library and CLI tool for working with Unreal Engine .pak files.
  - Unpacking is guarded against malicious pak that attempt to write to parent directories
 
 ## cli
-```
+```console
+$ repak --help
 Usage: repak [OPTIONS] <COMMAND>
 
 Commands:
@@ -29,6 +30,30 @@ Options:
   -a, --aes-key <AES_KEY>  256 bit AES encryption key as base64 or hex string if the pak is encrypted
   -h, --help               Print help
   -V, --version            Print version
+```
+
+### packing
+```console
+$ find mod
+mod
+mod/assets
+mod/assets/AssetA.uasset
+mod/assets/AssetA.uexp
+
+$ repak pack -v mod
+packing assets/AssetA.uasset
+packing assets/AssetA.uexp
+Packed 4 files to mod.pak
+
+$ repak list mod.pak
+assets/AssetA.uasset
+assets/AssetA.uexp
+```
+
+### unpacking
+```console
+$ repak --aes-key 0x12345678 unpack MyEncryptedGame.pak
+Unpacked 12345 files to MyEncryptedGame from MyEncryptedGame.pak
 ```
 
 ## compatibility

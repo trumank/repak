@@ -20,5 +20,5 @@ fn test_readme_help() {
 
     let readme = std::fs::read_to_string(workspace_dir().join("README.md")).unwrap();
 
-    assert!(readme.contains(&format!("```\n{help}```")));
+    assert!(readme.contains(&format!("```console\n$ repak --help\n{help}```")));
 }
