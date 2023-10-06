@@ -19,7 +19,7 @@ Usage: repak [OPTIONS] <COMMAND>
 Commands:
   info       Print .pak info
   list       List .pak files
-  hash-list  List .pka files and the SHA256 of their contents. Useful for finding differences between paks
+  hash-list  List .pak files and the SHA256 of their contents. Useful for finding differences between paks
   unpack     Unpack .pak file
   pack       Pack directory into .pak file
   get        Reads a single file to stdout

@@ -118,7 +118,7 @@ enum Action {
     Info(ActionInfo),
     /// List .pak files
     List(ActionList),
-    /// List .pka files and the SHA256 of their contents. Useful for finding differences between paks
+    /// List .pak files and the SHA256 of their contents. Useful for finding differences between paks
     HashList(ActionHashList),
     /// Unpack .pak file
     Unpack(ActionUnpack),
