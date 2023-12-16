@@ -1,5 +1,5 @@
 [package]
-name = "get_oodle"
+name = "oodle_loader"
 repository.workspace = true
 authors.workspace = true
 license.workspace = true

@@ -26,7 +26,7 @@ pub fn decompress() -> OodleDecompress {
     #[cfg(windows)]
     return windows_oodle::decompress_wrapper_windows;
     #[cfg(unix)]
-    return linux_oodle::get_oodle_linux();
+    return linux_oodle::oodle_loader_linux();
 }
 
 fn call_decompress(comp_buf: &[u8], raw_buf: &mut [u8], decompress: OodleLZ_Decompress) -> i32 {
@@ -234,7 +234,7 @@ mod linux_oodle {
         array
     }
 
-    pub fn get_oodle_linux() -> OodleDecompress {
+    pub fn oodle_loader_linux() -> OodleDecompress {
         DECOMPRESS.get_or_init(|| get_decompress_inner().unwrap());
         decompress_wrapper
     }
