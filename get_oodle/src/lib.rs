@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 use std::sync::OnceLock;
 
@@ -51,16 +51,34 @@ fn call_decompress(comp_buf: &[u8], raw_buf: &mut [u8], decompress: OodleLZ_Deco
 }
 
 static OODLE_HASH: [u8; 20] = hex_literal::hex!("4bcc73614cb8fd2b0bce8d0f91ee5f3202d9d624");
+static OODLE_DLL_NAME: &str = "oo2core_9_win64.dll";
 
 fn fetch_oodle() -> Result<std::path::PathBuf> {
     use sha1::{Digest, Sha1};
 
-    let oodle_path = std::env::current_exe()?.with_file_name("oo2core_9_win64.dll");
+    let oodle_path = std::env::current_exe()?.with_file_name(OODLE_DLL_NAME);
+
     if !oodle_path.exists() {
         let mut compressed = vec![];
-        ureq::get("https://origin.warframe.com/Tools/Oodle/x64/final/oo2core_9_win64.dll.F2DB01967705B62AECEF3CD3E5A28E4D.lzma")
+        ureq::get("https://origin.warframe.com/origin/50F7040A/index.txt.lzma")
             .call()?
-            .into_reader().read_to_end(&mut compressed)?;
+            .into_reader()
+            .read_to_end(&mut compressed)?;
+
+        let mut decompressed = vec![];
+        lzma_rs::lzma_decompress(&mut std::io::Cursor::new(compressed), &mut decompressed).unwrap();
+        let index = String::from_utf8(decompressed)?;
+        let line = index
+            .lines()
+            .find(|l| l.contains(OODLE_DLL_NAME))
+            .with_context(|| format!("{OODLE_DLL_NAME} not found in index"))?;
+        let path = line.split_once(',').context("failed to parse index")?.0;
+
+        let mut compressed = vec![];
+        ureq::get(&format!("https://content.warframe.com{path}"))
+            .call()?
+            .into_reader()
+            .read_to_end(&mut compressed)?;
 
         let mut decompressed = vec![];
         lzma_rs::lzma_decompress(&mut std::io::Cursor::new(compressed), &mut decompressed).unwrap();
@@ -222,11 +240,11 @@ mod linux_oodle {
     }
 
     fn get_decompress_inner() -> Result<OodleLZ_Decompress> {
-        fetch_oodle().ok();
+        fetch_oodle()?;
         let oodle = std::env::current_exe()
             .unwrap()
-            .with_file_name("oo2core_9_win64.dll");
-        let dll = std::fs::read(&oodle)?;
+            .with_file_name(OODLE_DLL_NAME);
+        let dll = std::fs::read(oodle)?;
 
         let obj_file = PeFile64::parse(&*dll)?;
 
