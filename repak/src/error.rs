@@ -16,14 +16,7 @@ pub enum Error {
     #[error("enable the encryption feature to read encrypted paks")]
     Encryption,
 
-    #[cfg_attr(
-        windows,
-        error("enable the oodle feature to read Oodle compressed paks")
-    )]
-    #[cfg_attr(
-        not(windows),
-        error("Oodle compression only supported on Windows (or WINE)")
-    )]
+    #[error("enable the oodle feature to read Oodle compressed paks")]
     Oodle,
 
     // std errors
@@ -39,10 +32,6 @@ pub enum Error {
     #[error("utf16 conversion: {0}")]
     Utf16(#[from] std::string::FromUtf16Error),
 
-    #[cfg(feature = "oodle")]
-    #[error("ureq error: {0}")]
-    Ureq(#[from] Box<ureq::Error>), // boxed because ureq::Error is quite large
-
     #[error("bufwriter dereference: {0}")]
     IntoInner(#[from] std::io::IntoInnerError<std::io::BufWriter<Vec<u8>>>),
 
@@ -53,7 +42,7 @@ pub enum Error {
     #[error("found magic of {0:#x} instead of {:#x}", super::MAGIC)]
     Magic(u32),
 
-    #[error("Could not load oo2core_9_win64.dll")]
+    #[error("pointer to OodleLZ_Decompress was not provided")]
     OodleFailed,
 
     #[error("No entry found at {0}")]

@@ -7,10 +7,16 @@ mod pak;
 
 pub use {error::*, pak::*};
 
-#[cfg(all(feature = "oodle", not(target_os = "windows")))]
-compile_error!("Oodle compression only supported on Windows (or WINE)");
-
 pub const MAGIC: u32 = 0x5A6F12E1;
+
+#[cfg(feature = "oodle")]
+mod oodle {
+    pub type OodleGetter = fn() -> Result<OodleDecompress, Box<dyn std::error::Error>>;
+    pub type OodleDecompress = fn(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32;
+}
+
+#[cfg(feature = "oodle_loader")]
+pub use oodle_loader;
 
 #[derive(
     Clone,
@@ -124,10 +130,11 @@ pub enum Compression {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) enum Key {
     #[cfg(feature = "encryption")]
     Some(aes::Aes256),
+    #[default]
     None,
 }
 
@@ -136,4 +143,12 @@ impl From<aes::Aes256> for Key {
     fn from(value: aes::Aes256) -> Self {
         Self::Some(value)
     }
+}
+
+#[derive(Debug, Default)]
+pub(crate) enum Oodle {
+    #[cfg(feature = "oodle")]
+    Some(oodle::OodleGetter),
+    #[default]
+    None,
 }

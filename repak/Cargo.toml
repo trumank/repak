@@ -9,26 +9,20 @@ edition.workspace = true
 [features]
 default = ["compression", "encryption"]
 compression = ["dep:flate2", "dep:zstd"]
-oodle = ["dep:libloading", "dep:ureq", "dep:once_cell", "dep:hex-literal", "dep:hex"]
+oodle = []
+oodle_loader = ["dep:oodle_loader"]
 encryption = ["dep:aes"]
 
 [dependencies]
 byteorder = "1.4"
-aes = { version = "0.8", optional = true }
+aes = { workspace = true, optional = true }
 flate2 = { version = "1.0", optional = true }
 zstd = { version = "0.12", optional = true }
+oodle_loader = { path = "../oodle_loader", optional = true}
 thiserror = "1.0"
-sha1 = "0.10.5"
+sha1 = { workspace = true }
 strum = { workspace = true }
-libloading = { version = "0.7", optional = true }
-ureq = { version = "2.6", optional = true }
-once_cell = { version = "1.17", optional = true}
-hex-literal = { version = "0.4", optional = true }
-hex = { workspace = true, optional = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
 paste = "1.0.11"
-
-[package.metadata.cargo-all-features]
-denylist = ["oodle"]

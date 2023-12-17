@@ -4,10 +4,52 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
 
+#[derive(Debug, Default)]
+pub struct PakBuilder {
+    key: super::Key,
+    oodle: super::Oodle,
+}
+
+impl PakBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    #[cfg(feature = "encryption")]
+    pub fn key(mut self, key: aes::Aes256) -> Self {
+        self.key = super::Key::Some(key);
+        self
+    }
+    #[cfg(feature = "oodle")]
+    pub fn oodle(mut self, oodle_getter: super::oodle::OodleGetter) -> Self {
+        self.oodle = super::Oodle::Some(oodle_getter);
+        self
+    }
+    pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
+        PakReader::new_any_inner(reader, self.key, self.oodle)
+    }
+    pub fn reader_with_version<R: Read + Seek>(
+        self,
+        reader: &mut R,
+        version: super::Version,
+    ) -> Result<PakReader, super::Error> {
+        PakReader::new_inner(reader, version, self.key, self.oodle)
+    }
+    pub fn writer<W: Write + Seek>(
+        self,
+        writer: W,
+        version: super::Version,
+        mount_point: String,
+        path_hash_seed: Option<u64>,
+    ) -> PakWriter<W> {
+        PakWriter::new_inner(writer, self.key, version, mount_point, path_hash_seed)
+    }
+}
+
 #[derive(Debug)]
 pub struct PakReader {
     pak: Pak,
     key: super::Key,
+    oodle: super::Oodle,
 }
 
 #[derive(Debug)]
@@ -83,79 +125,30 @@ fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
 }
 
 impl PakReader {
-    pub fn new_any<R: Read + Seek>(reader: &mut R) -> Result<Self, super::Error> {
-        Self::new_any_inner(reader, super::Key::None)
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_any_with_key<R: Read + Seek>(
-        reader: &mut R,
-        key: aes::Aes256,
-    ) -> Result<Self, super::Error> {
-        Self::new_any_inner(reader, key.into())
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_any_with_optional_key<R: Read + Seek>(
-        reader: &mut R,
-        key: Option<aes::Aes256>,
-    ) -> Result<Self, super::Error> {
-        match key {
-            Some(key) => Self::new_any_with_key(reader, key),
-            None => Self::new_any(reader),
-        }
-    }
-
     fn new_any_inner<R: Read + Seek>(
         reader: &mut R,
         key: super::Key,
+        oodle: super::Oodle,
     ) -> Result<Self, super::Error> {
         use std::fmt::Write;
         let mut log = "\n".to_owned();
 
         for ver in Version::iter() {
             match Pak::read(&mut *reader, ver, &key) {
-                Ok(pak) => return Ok(Self { pak, key }),
+                Ok(pak) => return Ok(Self { pak, key, oodle }),
                 Err(err) => writeln!(log, "trying version {} failed: {}", ver, err)?,
             }
         }
         Err(super::Error::UnsupportedOrEncrypted(log))
     }
 
-    pub fn new<R: Read + Seek>(
-        reader: &mut R,
-        version: super::Version,
-    ) -> Result<Self, super::Error> {
-        Self::new_inner(reader, version, super::Key::None)
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_key<R: Read + Seek>(
-        reader: &mut R,
-        version: super::Version,
-        key: aes::Aes256,
-    ) -> Result<Self, super::Error> {
-        Self::new_inner(reader, version, key.into())
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_optional_key<R: Read + Seek>(
-        reader: &mut R,
-        version: super::Version,
-        key: Option<aes::Aes256>,
-    ) -> Result<Self, super::Error> {
-        match key {
-            Some(key) => Self::new_with_key(reader, version, key),
-            None => Self::new(reader, version),
-        }
-    }
-
     fn new_inner<R: Read + Seek>(
         reader: &mut R,
         version: super::Version,
         key: super::Key,
+        oodle: super::Oodle,
     ) -> Result<Self, super::Error> {
-        Pak::read(reader, version, &key).map(|pak| Self { pak, key })
+        Pak::read(reader, version, &key).map(|pak| Self { pak, key, oodle })
     }
 
     pub fn version(&self) -> super::Version {
@@ -192,6 +185,7 @@ impl PakReader {
                 self.pak.version,
                 &self.pak.compression,
                 &self.key,
+                &self.oodle,
                 writer,
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
@@ -216,48 +210,6 @@ impl PakReader {
 }
 
 impl<W: Write + Seek> PakWriter<W> {
-    pub fn new(
-        writer: W,
-        version: Version,
-        mount_point: String,
-        path_hash_seed: Option<u64>,
-    ) -> Self {
-        PakWriter {
-            pak: Pak::new(version, mount_point, path_hash_seed),
-            writer,
-            key: super::Key::None,
-        }
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_key(
-        writer: W,
-        key: aes::Aes256,
-        version: Version,
-        mount_point: String,
-        path_hash_seed: Option<u64>,
-    ) -> Self {
-        PakWriter {
-            pak: Pak::new(version, mount_point, path_hash_seed),
-            writer,
-            key: key.into(),
-        }
-    }
-
-    #[cfg(feature = "encryption")]
-    pub fn new_with_optional_key(
-        writer: W,
-        key: Option<aes::Aes256>,
-        version: Version,
-        mount_point: String,
-        path_hash_seed: Option<u64>,
-    ) -> Self {
-        match key {
-            Some(key) => Self::new_with_key(writer, key, version, mount_point, path_hash_seed),
-            None => Self::new(writer, version, mount_point, path_hash_seed),
-        }
-    }
-
     fn new_inner(
         writer: W,
         key: super::Key,

@@ -175,10 +175,11 @@ fn main() -> Result<(), repak::Error> {
 }
 
 fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::Error> {
-    let pak = repak::PakReader::new_any_with_optional_key(
-        &mut BufReader::new(File::open(action.input)?),
-        aes_key,
-    )?;
+    let mut builder = repak::PakBuilder::new();
+    if let Some(aes_key) = aes_key {
+        builder = builder.key(aes_key);
+    }
+    let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
     println!("mount point: {}", pak.mount_point());
     println!("version: {}", pak.version());
     println!("version major: {}", pak.version().version_major());
@@ -189,10 +190,11 @@ fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::E
 }
 
 fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::Error> {
-    let pak = repak::PakReader::new_any_with_optional_key(
-        &mut BufReader::new(File::open(action.input)?),
-        aes_key,
-    )?;
+    let mut builder = repak::PakBuilder::new();
+    if let Some(aes_key) = aes_key {
+        builder = builder.key(aes_key);
+    }
+    let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
 
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&action.strip_prefix);
@@ -221,10 +223,11 @@ fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::E
 }
 
 fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(), repak::Error> {
-    let pak = repak::PakReader::new_any_with_optional_key(
-        &mut BufReader::new(File::open(&action.input)?),
-        aes_key,
-    )?;
+    let mut builder = repak::PakBuilder::new();
+    if let Some(aes_key) = aes_key {
+        builder = builder.key(aes_key);
+    }
+    let pak = builder.reader(&mut BufReader::new(File::open(&action.input)?))?;
 
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&action.strip_prefix);
@@ -248,7 +251,6 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
 
     let hashes: std::sync::Arc<std::sync::Mutex<BTreeMap<std::borrow::Cow<'_, str>, Vec<u8>>>> =
         Default::default();
-
     full_paths.par_iter().zip(stripped).try_for_each_init(
         || (hashes.clone(), File::open(&action.input)),
         |(hashes, file), ((_full_path, path), stripped)| -> Result<(), repak::Error> {
@@ -280,10 +282,11 @@ const STYLE: &str = "[{elapsed_precise}] [{wide_bar}] {pos}/{len} ({eta})";
 
 fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repak::Error> {
     for input in &action.input {
-        let pak = repak::PakReader::new_any_with_optional_key(
-            &mut BufReader::new(File::open(input)?),
-            aes_key.clone(),
-        )?;
+        let mut builder = repak::PakBuilder::new().oodle(oodle_loader::decompress);
+        if let Some(aes_key) = aes_key.clone() {
+            builder = builder.key(aes_key);
+        }
+        let pak = builder.reader(&mut BufReader::new(File::open(input)?))?;
         let output = action
             .output
             .as_ref()
@@ -354,6 +357,7 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
 
         let progress = indicatif::ProgressBar::new(entries.len() as u64)
             .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+
         entries.par_iter().try_for_each_init(
             || (progress.clone(), File::open(input)),
             |(progress, file), entry| -> Result<(), repak::Error> {
@@ -415,9 +419,8 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     collect_files(&mut paths, input_path)?;
     paths.sort();
 
-    let mut pak = repak::PakWriter::new_with_optional_key(
+    let mut pak = repak::PakBuilder::new().writer(
         BufWriter::new(File::create(&output)?),
-        None,
         args.version,
         args.mount_point,
         Some(args.path_hash_seed),
@@ -450,7 +453,11 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
 
 fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error> {
     let mut reader = BufReader::new(File::open(&args.input)?);
-    let pak = repak::PakReader::new_any_with_optional_key(&mut reader, aes_key)?;
+    let mut builder = repak::PakBuilder::new().oodle(oodle_loader::decompress);
+    if let Some(aes_key) = aes_key {
+        builder = builder.key(aes_key);
+    }
+    let pak = builder.reader(&mut reader)?;
     let mount_point = PathBuf::from(pak.mount_point());
     let prefix = Path::new(&args.strip_prefix);
 
