@@ -10,10 +10,13 @@ pub use {error::*, pak::*};
 pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[cfg(feature = "oodle")]
-static mut OODLE: Option<once_cell::sync::Lazy<OodleDecompress>> = None;
+mod oodle {
+    pub type OodleGetter = fn() -> Result<OodleDecompress, Box<dyn std::error::Error>>;
+    pub type OodleDecompress = fn(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32;
+}
 
-#[cfg(feature = "oodle")]
-type OodleDecompress = fn(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32;
+#[cfg(feature = "oodle_loader")]
+pub use oodle_loader;
 
 #[derive(
     Clone,
@@ -127,10 +130,11 @@ pub enum Compression {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) enum Key {
     #[cfg(feature = "encryption")]
     Some(aes::Aes256),
+    #[default]
     None,
 }
 
@@ -141,13 +145,10 @@ impl From<aes::Aes256> for Key {
     }
 }
 
-#[cfg(feature = "oodle")]
-pub(crate) enum Oodle<'func> {
-    Some(&'func OodleDecompress),
-    None,
-}
-
-#[cfg(not(feature = "oodle"))]
+#[derive(Debug, Default)]
 pub(crate) enum Oodle {
+    #[cfg(feature = "oodle")]
+    Some(oodle::OodleGetter),
+    #[default]
     None,
 }

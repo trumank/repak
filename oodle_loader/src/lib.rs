@@ -22,11 +22,11 @@ type OodleLZ_Decompress = unsafe extern "win64" fn(
     threadPhase: u32,
 ) -> i32;
 
-pub fn decompress() -> OodleDecompress {
+pub fn decompress() -> Result<OodleDecompress, Box<dyn std::error::Error>> {
     #[cfg(windows)]
-    return windows_oodle::decompress_wrapper_windows;
+    return Ok(windows_oodle::decompress_wrapper_windows);
     #[cfg(unix)]
-    return linux_oodle::oodle_loader_linux();
+    return Ok(linux_oodle::oodle_loader_linux());
 }
 
 fn call_decompress(comp_buf: &[u8], raw_buf: &mut [u8], decompress: OodleLZ_Decompress) -> i32 {

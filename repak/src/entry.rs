@@ -306,6 +306,7 @@ impl Entry {
         version: Version,
         compression: &[Compression],
         #[allow(unused)] key: &super::Key,
+        #[allow(unused)] oodle: &super::Oodle,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
@@ -375,10 +376,11 @@ impl Entry {
                 }
             }
             #[cfg(feature = "oodle")]
-            Some(Compression::Oodle) => unsafe {
-                let Some(ref oodle) = super::OODLE else {
-                    return Err(super::Error::OodleFailed);
-                };
+            Some(Compression::Oodle) => {
+                let oodle = match oodle {
+                    crate::Oodle::Some(getter) => getter().map_err(|_| super::Error::OodleFailed),
+                    crate::Oodle::None => Err(super::Error::OodleFailed),
+                }?;
                 let mut decompressed = vec![0; self.uncompressed as usize];
 
                 let mut compress_offset = 0;
@@ -408,7 +410,7 @@ impl Entry {
                     "Oodle decompression length mismatch"
                 );
                 buf.write_all(&decompressed)?;
-            },
+            }
             #[cfg(not(feature = "oodle"))]
             Some(Compression::Oodle) => return Err(super::Error::Oodle),
             #[cfg(not(feature = "compression"))]

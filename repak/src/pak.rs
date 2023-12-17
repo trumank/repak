@@ -4,16 +4,15 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PakBuilder {
     key: super::Key,
+    oodle: super::Oodle,
 }
 
 impl PakBuilder {
     pub fn new() -> Self {
-        Self {
-            key: super::Key::None,
-        }
+        Self::default()
     }
     #[cfg(feature = "encryption")]
     pub fn key(mut self, key: aes::Aes256) -> Self {
@@ -21,19 +20,19 @@ impl PakBuilder {
         self
     }
     #[cfg(feature = "oodle")]
-    pub fn oodle(self, oodle: fn() -> super::OodleDecompress) -> Self {
-        unsafe { super::OODLE = Some(once_cell::sync::Lazy::new(oodle)) }
+    pub fn oodle(mut self, oodle_getter: super::oodle::OodleGetter) -> Self {
+        self.oodle = super::Oodle::Some(oodle_getter);
         self
     }
     pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
-        PakReader::new_any_inner(reader, self.key)
+        PakReader::new_any_inner(reader, self.key, self.oodle)
     }
     pub fn reader_with_version<R: Read + Seek>(
         self,
         reader: &mut R,
         version: super::Version,
     ) -> Result<PakReader, super::Error> {
-        PakReader::new_inner(reader, version, self.key)
+        PakReader::new_inner(reader, version, self.key, self.oodle)
     }
     pub fn writer<W: Write + Seek>(
         self,
@@ -50,6 +49,7 @@ impl PakBuilder {
 pub struct PakReader {
     pak: Pak,
     key: super::Key,
+    oodle: super::Oodle,
 }
 
 #[derive(Debug)]
@@ -128,13 +128,14 @@ impl PakReader {
     fn new_any_inner<R: Read + Seek>(
         reader: &mut R,
         key: super::Key,
+        oodle: super::Oodle,
     ) -> Result<Self, super::Error> {
         use std::fmt::Write;
         let mut log = "\n".to_owned();
 
         for ver in Version::iter() {
             match Pak::read(&mut *reader, ver, &key) {
-                Ok(pak) => return Ok(Self { pak, key }),
+                Ok(pak) => return Ok(Self { pak, key, oodle }),
                 Err(err) => writeln!(log, "trying version {} failed: {}", ver, err)?,
             }
         }
@@ -145,8 +146,9 @@ impl PakReader {
         reader: &mut R,
         version: super::Version,
         key: super::Key,
+        oodle: super::Oodle,
     ) -> Result<Self, super::Error> {
-        Pak::read(reader, version, &key).map(|pak| Self { pak, key })
+        Pak::read(reader, version, &key).map(|pak| Self { pak, key, oodle })
     }
 
     pub fn version(&self) -> super::Version {
@@ -183,6 +185,7 @@ impl PakReader {
                 self.pak.version,
                 &self.pak.compression,
                 &self.key,
+                &self.oodle,
                 writer,
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
