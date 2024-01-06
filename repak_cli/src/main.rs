@@ -57,6 +57,10 @@ struct ActionUnpack {
     #[arg(short, long, default_value = "false")]
     verbose: bool,
 
+    /// Hides normal output such as progress bar and completion status
+    #[arg(short, long, default_value = "false")]
+    quiet: bool,
+
     /// Force overwrite existing files/directories.
     #[arg(short, long, default_value = "false")]
     force: bool,
@@ -95,6 +99,10 @@ struct ActionPack {
     /// Verbose
     #[arg(short, long, default_value = "false")]
     verbose: bool,
+
+    /// Hides normal output such as progress bar and completion status
+    #[arg(short, long, default_value = "false")]
+    quiet: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -280,6 +288,20 @@ fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(),
 
 const STYLE: &str = "[{elapsed_precise}] [{wide_bar}] {pos}/{len} ({eta})";
 
+#[derive(Clone)]
+enum Output {
+    Progress(indicatif::ProgressBar),
+    Stdout,
+}
+impl Output {
+    pub fn println<I: AsRef<str>>(&self, msg: I) {
+        match self {
+            Output::Progress(progress) => progress.println(msg),
+            Output::Stdout => println!("{}", msg.as_ref()),
+        }
+    }
+}
+
 fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repak::Error> {
     for input in &action.input {
         let mut builder = repak::PakBuilder::new().oodle(oodle_loader::decompress);
@@ -355,14 +377,20 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
             .filter_map(|e| e.transpose())
             .collect::<Result<Vec<_>, repak::Error>>()?;
 
-        let progress = indicatif::ProgressBar::new(entries.len() as u64)
-            .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+        let progress = (!action.quiet).then(|| {
+            indicatif::ProgressBar::new(entries.len() as u64)
+                .with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap())
+        });
+        let log = match &progress {
+            Some(progress) => Output::Progress(progress.clone()),
+            None => Output::Stdout,
+        };
 
         entries.par_iter().try_for_each_init(
             || (progress.clone(), File::open(input)),
             |(progress, file), entry| -> Result<(), repak::Error> {
                 if action.verbose {
-                    progress.println(format!("unpacking {}", entry.entry_path));
+                    log.println(format!("unpacking {}", entry.entry_path));
                 }
                 fs::create_dir_all(&entry.out_dir)?;
                 pak.read_file(
@@ -373,18 +401,24 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
                     ),
                     &mut fs::File::create(&entry.out_path)?,
                 )?;
-                progress.inc(1);
+                if let Some(progress) = progress {
+                    progress.inc(1);
+                }
                 Ok(())
             },
         )?;
-        progress.finish();
+        if let Some(progress) = progress {
+            progress.finish();
+        }
 
-        println!(
-            "Unpacked {} files to {} from {}",
-            entries.len(),
-            output.display(),
-            input
-        );
+        if !action.quiet {
+            println!(
+                "Unpacked {} files to {} from {}",
+                entries.len(),
+                output.display(),
+                input
+            );
+        }
     }
 
     Ok(())
@@ -428,10 +462,18 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
 
     use indicatif::ProgressIterator;
 
-    let mut iter = paths
-        .iter()
-        .progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
-    let progress = iter.progress.clone();
+    let iter = paths.iter();
+    let (log, mut iter) = if !args.quiet {
+        let iter =
+            iter.progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
+        (
+            Output::Progress(iter.progress.clone()),
+            itertools::Either::Left(iter),
+        )
+    } else {
+        (Output::Stdout, itertools::Either::Right(iter))
+    };
+    let log = log.clone();
     iter.try_for_each(|p| {
         let rel = &p
             .strip_prefix(input_path)
@@ -439,14 +481,16 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
             .to_slash()
             .expect("failed to convert to slash path");
         if args.verbose {
-            progress.println(format!("packing {}", &rel));
+            log.println(format!("packing {}", &rel));
         }
         pak.write_file(rel, std::fs::read(p)?)
     })?;
 
     pak.write_index()?;
 
-    println!("Packed {} files to {}", paths.len(), output.display());
+    if !args.quiet {
+        println!("Packed {} files to {}", paths.len(), output.display());
+    }
 
     Ok(())
 }
