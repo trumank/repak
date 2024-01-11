@@ -92,6 +92,13 @@ struct ActionPack {
     )]
     version: repak::Version,
 
+    /// Compressio
+    #[arg(
+        long,
+        value_parser = clap::builder::PossibleValuesParser::new(repak::Compression::VARIANTS).map(|s| s.parse::<repak::Compression>().unwrap())
+    )]
+    compression: Option<repak::Compression>,
+
     /// Path hash seed for >= V10
     #[arg(short, long, default_value = "0")]
     path_hash_seed: u64,
@@ -453,12 +460,14 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     collect_files(&mut paths, input_path)?;
     paths.sort();
 
-    let mut pak = repak::PakBuilder::new().writer(
-        BufWriter::new(File::create(&output)?),
-        args.version,
-        args.mount_point,
-        Some(args.path_hash_seed),
-    );
+    let mut pak = repak::PakBuilder::new()
+        .compression(args.compression.iter().cloned())
+        .writer(
+            BufWriter::new(File::create(&output)?),
+            args.version,
+            args.mount_point,
+            Some(args.path_hash_seed),
+        );
 
     use indicatif::ProgressIterator;
 
