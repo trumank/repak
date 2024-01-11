@@ -119,10 +119,10 @@ impl Version {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString, strum::EnumVariantNames,
+)]
 pub enum Compression {
-    #[default]
-    None,
     Zlib,
     Gzip,
     Oodle,

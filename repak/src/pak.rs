@@ -1,3 +1,6 @@
+use crate::entry::Entry;
+use crate::Compression;
+
 use super::ext::{ReadExt, WriteExt};
 use super::{Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -8,6 +11,7 @@ use std::io::{self, Read, Seek, Write};
 pub struct PakBuilder {
     key: super::Key,
     oodle: super::Oodle,
+    allowed_compression: Vec<Compression>,
 }
 
 impl PakBuilder {
@@ -22,6 +26,11 @@ impl PakBuilder {
     #[cfg(feature = "oodle")]
     pub fn oodle(mut self, oodle_getter: super::oodle::OodleGetter) -> Self {
         self.oodle = super::Oodle::Some(oodle_getter);
+        self
+    }
+    #[cfg(feature = "compression")]
+    pub fn compression(mut self, compression: impl IntoIterator<Item = Compression>) -> Self {
+        self.allowed_compression = compression.into_iter().collect();
         self
     }
     pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
@@ -41,7 +50,14 @@ impl PakBuilder {
         mount_point: String,
         path_hash_seed: Option<u64>,
     ) -> PakWriter<W> {
-        PakWriter::new_inner(writer, self.key, version, mount_point, path_hash_seed)
+        PakWriter::new_inner(
+            writer,
+            self.key,
+            version,
+            mount_point,
+            path_hash_seed,
+            self.allowed_compression,
+        )
     }
 }
 
@@ -57,6 +73,7 @@ pub struct PakWriter<W: Write + Seek> {
     pak: Pak,
     writer: W,
     key: super::Key,
+    allowed_compression: Vec<Compression>,
 }
 
 #[derive(Debug)]
@@ -67,7 +84,7 @@ pub(crate) struct Pak {
     index: Index,
     encrypted_index: bool,
     encryption_guid: Option<u128>,
-    compression: Vec<super::Compression>,
+    compression: Vec<Option<Compression>>,
 }
 
 impl Pak {
@@ -79,7 +96,15 @@ impl Pak {
             index: Index::new(path_hash_seed),
             encrypted_index: false,
             encryption_guid: None,
-            compression: vec![],
+            compression: (if version.version_major() < VersionMajor::FNameBasedCompression {
+                vec![
+                    Some(Compression::Zlib),
+                    Some(Compression::Gzip),
+                    Some(Compression::Oodle),
+                ]
+            } else {
+                vec![]
+            }),
         }
     }
 }
@@ -202,6 +227,7 @@ impl PakReader {
     ) -> Result<PakWriter<W>, super::Error> {
         writer.seek(io::SeekFrom::Start(self.pak.index_offset.unwrap()))?;
         Ok(PakWriter {
+            allowed_compression: self.pak.compression.iter().filter_map(|c| *c).collect(),
             pak: self.pak,
             key: self.key,
             writer,
@@ -216,11 +242,13 @@ impl<W: Write + Seek> PakWriter<W> {
         version: Version,
         mount_point: String,
         path_hash_seed: Option<u64>,
+        allowed_compression: Vec<Compression>,
     ) -> Self {
         PakWriter {
             pak: Pak::new(version, mount_point, path_hash_seed),
             writer,
             key,
+            allowed_compression,
         }
     }
 
@@ -229,34 +257,17 @@ impl<W: Write + Seek> PakWriter<W> {
     }
 
     pub fn write_file(&mut self, path: &str, data: impl AsRef<[u8]>) -> Result<(), super::Error> {
-        use sha1::{Digest, Sha1};
-        let mut hasher = Sha1::new();
-        hasher.update(&data);
+        self.pak.index.add_entry(
+            path,
+            Entry::write_file(
+                &mut self.writer,
+                self.pak.version,
+                &mut self.pak.compression,
+                &self.allowed_compression,
+                data,
+            )?,
+        );
 
-        let offset = self.writer.stream_position()?;
-        let len = data.as_ref().len() as u64;
-
-        let entry = super::entry::Entry {
-            offset,
-            compressed: len,
-            uncompressed: len,
-            compression: None,
-            timestamp: None,
-            hash: Some(hasher.finalize().into()),
-            blocks: None,
-            flags: 0,
-            compression_block_size: 0,
-        };
-
-        entry.write(
-            &mut self.writer,
-            self.pak.version,
-            super::entry::EntryLocation::Data,
-        )?;
-
-        self.pak.index.add_entry(path, entry);
-
-        self.writer.write_all(data.as_ref())?;
         Ok(())
     }
 

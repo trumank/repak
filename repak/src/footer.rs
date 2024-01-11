@@ -15,7 +15,7 @@ pub struct Footer {
     pub index_size: u64,
     pub hash: [u8; 20],
     pub frozen: bool,
-    pub compression: Vec<Compression>,
+    pub compression: Vec<Option<Compression>>,
 }
 
 impl Footer {
@@ -47,13 +47,13 @@ impl Footer {
                             .filter_map(|&ch| (ch != 0).then_some(ch as char))
                             .collect::<String>(),
                     )
-                    .unwrap_or_default(),
+                    .ok(),
                 )
             }
-            if version < Version::V8A {
-                compression.push(Compression::Zlib);
-                compression.push(Compression::Gzip);
-                compression.push(Compression::Oodle);
+            if version.version_major() < VersionMajor::FNameBasedCompression {
+                compression.push(Some(Compression::Zlib));
+                compression.push(Some(Compression::Gzip));
+                compression.push(Some(Compression::Oodle));
             }
             compression
         };
@@ -103,11 +103,9 @@ impl Footer {
         // TODO: handle if compression.len() > algo_size
         for i in 0..algo_size {
             let mut name = [0; 32];
-            if let Some(algo) = self.compression.get(i) {
-                if algo != &Compression::None {
-                    for (i, b) in algo.to_string().as_bytes().iter().enumerate() {
-                        name[i] = *b;
-                    }
+            if let Some(algo) = self.compression.get(i).cloned().flatten() {
+                for (i, b) in algo.to_string().as_bytes().iter().enumerate() {
+                    name[i] = *b;
                 }
             }
             writer.write_all(&name)?;
