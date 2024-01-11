@@ -1,10 +1,17 @@
 [package]
 name = "repak_cli"
+description = "Utility for building/extracting/inspecting Unreal Engine .pak files"
 repository.workspace = true
 authors.workspace = true
 license.workspace = true
 version.workspace = true
 edition.workspace = true
+
+[package.metadata.wix]
+upgrade-guid = "723E95D8-E87B-46BC-AD3B-C128583967CF"
+path-guid = "F58A5112-1B44-49DA-8772-4E68F01E4AB7"
+license = false
+eula = false
 
 [[bin]]
 name = "repak"
