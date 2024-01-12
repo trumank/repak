@@ -194,7 +194,7 @@ impl Entry {
             compressed: compressed
                 .as_ref()
                 .map(|c: &Vec<u8>| c.len() as u64)
-                .unwrap_or_default(),
+                .unwrap_or(len),
             uncompressed: len,
             compression_slot,
             timestamp: None,
