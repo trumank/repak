@@ -92,7 +92,7 @@ struct ActionPack {
     )]
     version: repak::Version,
 
-    /// Compressio
+    /// Compression
     #[arg(
         long,
         value_parser = clap::builder::PossibleValuesParser::new(repak::Compression::VARIANTS).map(|s| s.parse::<repak::Compression>().unwrap())
