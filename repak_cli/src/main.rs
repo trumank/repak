@@ -238,7 +238,7 @@ fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::E
 }
 
 fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(), repak::Error> {
-    let mut builder = repak::PakBuilder::new();
+    let mut builder = repak::PakBuilder::new().oodle(oodle_loader::decompress);
     if let Some(aes_key) = aes_key {
         builder = builder.key(aes_key);
     }
