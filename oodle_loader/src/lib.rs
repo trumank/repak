@@ -104,8 +104,6 @@ fn fetch_oodle() -> Result<std::path::PathBuf> {
 mod windows_oodle {
     use super::*;
 
-    use anyhow::Context;
-
     static DECOMPRESS: OnceLock<(OodleLZ_Decompress, libloading::Library)> = OnceLock::new();
 
     pub fn decompress_wrapper_windows(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32 {
@@ -126,7 +124,6 @@ mod windows_oodle {
 mod linux_oodle {
     use super::*;
 
-    use anyhow::Result;
     use object::pe::{
         ImageNtHeaders64, IMAGE_REL_BASED_DIR64, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ,
         IMAGE_SCN_MEM_WRITE,

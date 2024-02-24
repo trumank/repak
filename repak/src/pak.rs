@@ -7,7 +7,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PakBuilder {
     key: super::Key,
     oodle: super::Oodle,
@@ -16,14 +16,21 @@ pub struct PakBuilder {
 
 impl PakBuilder {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            key: Default::default(),
+            #[cfg(not(feature = "oodle_implicit_dynamic"))]
+            oodle: super::Oodle::None,
+            #[cfg(feature = "oodle_implicit_dynamic")]
+            oodle: super::Oodle::Some(oodle_loader::decompress),
+            allowed_compression: Default::default(),
+        }
     }
     #[cfg(feature = "encryption")]
     pub fn key(mut self, key: aes::Aes256) -> Self {
         self.key = super::Key::Some(key);
         self
     }
-    #[cfg(feature = "oodle")]
+    #[cfg(feature = "oodle_explicit")]
     pub fn oodle(mut self, oodle_getter: super::oodle::OodleGetter) -> Self {
         self.oodle = super::Oodle::Some(oodle_getter);
         self

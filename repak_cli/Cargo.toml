@@ -17,9 +17,12 @@ eula = false
 name = "repak"
 path = "src/main.rs"
 
+[features]
+default = ["oodle"]
+oodle = ["repak/oodle_implicit_dynamic"]
+
 [dependencies]
-oodle_loader = { path = "../oodle_loader" }
-repak = { path = "../repak", features = ["oodle"] }
+repak = { path = "../repak" }
 aes = { workspace = true }
 base64 = { workspace = true }
 clap = { version = "4.1.4", features = ["derive"] }

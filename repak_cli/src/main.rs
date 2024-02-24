@@ -238,7 +238,7 @@ fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::E
 }
 
 fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(), repak::Error> {
-    let mut builder = repak::PakBuilder::new().oodle(oodle_loader::decompress);
+    let mut builder = repak::PakBuilder::new();
     if let Some(aes_key) = aes_key {
         builder = builder.key(aes_key);
     }
@@ -311,7 +311,7 @@ impl Output {
 
 fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repak::Error> {
     for input in &action.input {
-        let mut builder = repak::PakBuilder::new().oodle(oodle_loader::decompress);
+        let mut builder = repak::PakBuilder::new();
         if let Some(aes_key) = aes_key.clone() {
             builder = builder.key(aes_key);
         }
@@ -506,7 +506,7 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
 
 fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error> {
     let mut reader = BufReader::new(File::open(&args.input)?);
-    let mut builder = repak::PakBuilder::new().oodle(oodle_loader::decompress);
+    let mut builder = repak::PakBuilder::new();
     if let Some(aes_key) = aes_key {
         builder = builder.key(aes_key);
     }
