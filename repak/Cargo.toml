@@ -5,6 +5,7 @@ authors.workspace = true
 license.workspace = true
 version.workspace = true
 edition.workspace = true
+keywords.workspace = true
 
 [features]
 default = ["compression", "encryption"]
