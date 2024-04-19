@@ -9,7 +9,7 @@ keywords.workspace = true
 
 [features]
 default = ["compression", "encryption"]
-compression = ["dep:flate2", "dep:zstd"]
+compression = ["dep:flate2", "dep:zstd", "dep:lz4_flex"]
 oodle = []
 oodle_loader = ["dep:oodle_loader"]
 oodle_explicit = ["oodle"]
@@ -25,6 +25,7 @@ oodle_loader = { path = "../oodle_loader", optional = true}
 thiserror = "1.0"
 sha1 = { workspace = true }
 strum = { workspace = true }
+lz4_flex = { version = "0.11.3", optional = true }
 
 [dev-dependencies]
 base64 = { workspace = true }

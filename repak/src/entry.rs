@@ -178,6 +178,7 @@ impl Entry {
                             compress.finish()?
                         }
                         Compression::Zstd => zstd::stream::encode_all(chunk, 0)?,
+                        Compression::LZ4 => lz4_flex::block::compress(chunk),
                         Compression::Oodle => {
                             return Err(Error::Other(
                                 "writing Oodle compression unsupported".into(),
@@ -519,6 +520,15 @@ impl Entry {
             Some(Compression::Zstd) => {
                 for range in ranges {
                     io::copy(&mut zstd::stream::read::Decoder::new(&data[range])?, buf)?;
+                }
+            }
+            #[cfg(feature = "compression")]
+            Some(Compression::LZ4) => {
+                for range in ranges {
+                    buf.write_all(
+                        &lz4_flex::decompress(&data[range], self.compression_block_size as usize)
+                            .map_err(|_| super::Error::DecompressionFailed(Compression::LZ4))?,
+                    )?;
                 }
             }
             #[cfg(feature = "oodle")]

@@ -127,6 +127,7 @@ pub enum Compression {
     Gzip,
     Oodle,
     Zstd,
+    LZ4,
 }
 
 #[allow(clippy::large_enum_variant)]
