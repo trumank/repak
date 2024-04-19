@@ -615,6 +615,19 @@ fn fnv64(data: &[u8], offset: u64) -> u64 {
     hash
 }
 
+fn split_path_child(path: &str) -> Option<(&str, &str)> {
+    if path == "/" || path.is_empty() {
+        None
+    } else {
+        let path = path.strip_suffix('/').unwrap_or(path);
+        let i = path.rfind('/').map(|i| i + 1);
+        match i {
+            Some(i) => Some(path.split_at(i)),
+            None => Some(("/", path)),
+        }
+    }
+}
+
 fn generate_full_directory_index<W: Write>(
     writer: &mut W,
     entries: &BTreeMap<String, super::entry::Entry>,
@@ -622,24 +635,21 @@ fn generate_full_directory_index<W: Write>(
 ) -> Result<(), super::Error> {
     let mut fdi = BTreeMap::new();
     for (path, offset) in entries.keys().zip(offsets) {
-        let (directory, filename) = {
-            let i = path.rfind('/').map(|i| i + 1); // we want to include the slash on the directory
-            match i {
-                Some(i) => {
-                    let (l, r) = path.split_at(i);
-                    (l.to_owned(), r.to_owned())
-                }
-                None => ("/".to_owned(), path.to_owned()),
-            }
-        };
+        let mut p = path.as_str();
+        while let Some((parent, _)) = split_path_child(p) {
+            p = parent;
+            fdi.entry(p).or_default();
+        }
+
+        let (directory, filename) = split_path_child(path).expect("none root path");
 
         fdi.entry(directory)
-            .and_modify(|d: &mut BTreeMap<String, u32>| {
-                d.insert(filename.clone(), *offset);
+            .and_modify(|d: &mut BTreeMap<&str, u32>| {
+                d.insert(filename, *offset);
             })
             .or_insert_with(|| {
                 let mut files_and_offsets = BTreeMap::new();
-                files_and_offsets.insert(filename.clone(), *offset);
+                files_and_offsets.insert(filename, *offset);
                 files_and_offsets
             });
     }
@@ -670,5 +680,27 @@ fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
     use aes::cipher::BlockEncrypt;
     for chunk in bytes.chunks_mut(16) {
         key.encrypt_block(aes::Block::from_mut_slice(chunk))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_split_path_child() {
+        assert_eq!(
+            split_path_child("a/really/long/path"),
+            Some(("a/really/long/", "path"))
+        );
+        assert_eq!(
+            split_path_child("a/really/long/"),
+            Some(("a/really/", "long"))
+        );
+        assert_eq!(split_path_child("a"), Some(("/", "a")));
+        assert_eq!(split_path_child("a//b"), Some(("a//", "b")));
+        assert_eq!(split_path_child("a//"), Some(("a/", "")));
+        assert_eq!(split_path_child("/"), None);
+        assert_eq!(split_path_child(""), None);
     }
 }
