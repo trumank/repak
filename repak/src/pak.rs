@@ -14,6 +14,12 @@ pub struct PakBuilder {
     allowed_compression: Vec<Compression>,
 }
 
+impl Default for PakBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PakBuilder {
     pub fn new() -> Self {
         Self {
