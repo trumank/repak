@@ -4,6 +4,8 @@ use super::{ext::BoolExt, ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
 
+pub const MAX_CHUNK_DATA_SIZE: usize = 0x10_000;
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum EntryLocation {
     Data,
@@ -99,7 +101,7 @@ impl Entry {
         hasher.update(&data);
 
         let offset = writer.stream_position()?;
-        let len = data.as_ref().len() as u64;
+        let len = data.as_ref().len();
 
         // TODO possibly select best compression based on some criteria instead of picking first
         let compression = allowed_compression.first().cloned();
@@ -148,41 +150,56 @@ impl Entry {
             Some(compression) => {
                 use std::io::Write;
 
-                let entry_size = Entry::get_serialized_size(version, compression_slot, 1);
-                let data_offset = offset + entry_size;
+                let chunks = data.as_ref().chunks(MAX_CHUNK_DATA_SIZE);
 
-                let compressed = match compression {
-                    Compression::Zlib => {
-                        let mut compress = flate2::write::ZlibEncoder::new(
-                            Vec::new(),
-                            flate2::Compression::fast(),
-                        );
-                        compress.write_all(data.as_ref())?;
-                        compress.finish()?
-                    }
-                    Compression::Gzip => {
-                        let mut compress =
-                            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-                        compress.write_all(data.as_ref())?;
-                        compress.finish()?
-                    }
-                    Compression::Zstd => zstd::stream::encode_all(data.as_ref(), 0)?,
-                    Compression::Oodle => {
-                        return Err(Error::Other("writing Oodle compression unsupported".into()))
-                    }
-                };
+                let num_chunks = chunks.len();
+                let mut blocks = Vec::with_capacity(num_chunks);
+                let mut compressed = Vec::new();
+                let entry_size =
+                    Entry::get_serialized_size(version, compression_slot, num_chunks as u32);
+                let mut data_offset = offset + entry_size;
 
-                let compute_offset = |index: usize| -> u64 {
-                    match version.version_major() >= VersionMajor::RelativeChunkOffsets {
-                        true => index as u64 + (data_offset - offset),
-                        false => index as u64 + data_offset,
-                    }
-                };
+                for chunk in chunks {
+                    let compressedpart = match compression {
+                        Compression::Zlib => {
+                            let mut compress = flate2::write::ZlibEncoder::new(
+                                Vec::new(),
+                                flate2::Compression::new(6),
+                            );
+                            compress.write_all(chunk)?;
+                            compress.finish()?
+                        }
+                        Compression::Gzip => {
+                            let mut compress = flate2::write::GzEncoder::new(
+                                Vec::new(),
+                                flate2::Compression::fast(),
+                            );
+                            compress.write_all(chunk)?;
+                            compress.finish()?
+                        }
+                        Compression::Zstd => zstd::stream::encode_all(chunk, 0)?,
+                        Compression::Oodle => {
+                            return Err(Error::Other(
+                                "writing Oodle compression unsupported".into(),
+                            ))
+                        }
+                    };
+                    compressed.extend_from_slice(&compressedpart);
 
-                let blocks = vec![Block {
-                    start: compute_offset(0),
-                    end: compute_offset(compressed.len()),
-                }];
+                    let compute_offset = |index: usize| -> u64 {
+                        match version.version_major() >= VersionMajor::RelativeChunkOffsets {
+                            true => index as u64 + (data_offset - offset),
+                            false => index as u64 + data_offset,
+                        }
+                    };
+
+                    blocks.push(Block {
+                        start: compute_offset(0),
+                        end: compute_offset(compressedpart.len()),
+                    });
+
+                    data_offset += compressedpart.len() as u64;
+                }
 
                 (Some(blocks), Some(compressed))
             }
@@ -191,17 +208,16 @@ impl Entry {
 
         let entry = super::entry::Entry {
             offset,
-            compressed: compressed
-                .as_ref()
-                .map(|c: &Vec<u8>| c.len() as u64)
-                .unwrap_or(len),
-            uncompressed: len,
+            compressed: compressed.as_ref().map(|c: &Vec<_>| c.len()).unwrap_or(len) as u64,
+            uncompressed: len as u64,
             compression_slot,
             timestamp: None,
             hash: Some(hasher.finalize().into()),
             blocks,
             flags: 0,
-            compression_block_size: compressed.as_ref().map(|_| len as u32).unwrap_or_default(),
+            compression_block_size: MAX_CHUNK_DATA_SIZE
+                .min(compressed.as_ref().map(|_| len).unwrap_or(0))
+                as u32,
         };
 
         entry.write(writer, version, EntryLocation::Data)?;
