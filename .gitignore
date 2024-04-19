@@ -1,3 +1,2 @@
 *target/
-*.lock
 /repak/tests/config.sh
