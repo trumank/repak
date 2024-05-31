@@ -599,12 +599,7 @@ fn generate_path_hash_index<W: Write>(
 ) -> Result<(), super::Error> {
     writer.write_u32::<LE>(entries.len() as u32)?;
     for (path, offset) in entries.keys().zip(offsets) {
-        let utf16le_path = path
-            .to_lowercase()
-            .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
-            .collect::<Vec<_>>();
-        let path_hash = fnv64(&utf16le_path, path_hash_seed);
+        let path_hash = fnv64_path(path, path_hash_seed);
         writer.write_u64::<LE>(path_hash)?;
         writer.write_u32::<LE>(*offset)?;
     }
@@ -614,15 +609,24 @@ fn generate_path_hash_index<W: Write>(
     Ok(())
 }
 
-fn fnv64(data: &[u8], offset: u64) -> u64 {
+fn fnv64<I>(data: I, offset: u64) -> u64
+where
+    I: IntoIterator<Item = u8>,
+{
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x00000100000001b3;
     let mut hash = OFFSET.wrapping_add(offset);
-    for &b in data {
+    for b in data.into_iter() {
         hash ^= b as u64;
         hash = hash.wrapping_mul(PRIME);
     }
     hash
+}
+
+fn fnv64_path(path: &str, offset: u64) -> u64 {
+    let lower = path.to_lowercase();
+    let data = lower.encode_utf16().flat_map(u16::to_le_bytes);
+    fnv64(data, offset)
 }
 
 fn split_path_child(path: &str) -> Option<(&str, &str)> {
