@@ -643,7 +643,7 @@ fn generate_full_directory_index<W: Write>(
     entries: &BTreeMap<String, super::entry::Entry>,
     offsets: &Vec<u32>,
 ) -> Result<(), super::Error> {
-    let mut fdi = BTreeMap::new();
+    let mut fdi: BTreeMap<&str, BTreeMap<&str, u32>> = Default::default();
     for (path, offset) in entries.keys().zip(offsets) {
         let mut p = path.as_str();
         while let Some((parent, _)) = split_path_child(p) {
@@ -653,15 +653,7 @@ fn generate_full_directory_index<W: Write>(
 
         let (directory, filename) = split_path_child(path).expect("none root path");
 
-        fdi.entry(directory)
-            .and_modify(|d: &mut BTreeMap<&str, u32>| {
-                d.insert(filename, *offset);
-            })
-            .or_insert_with(|| {
-                let mut files_and_offsets = BTreeMap::new();
-                files_and_offsets.insert(filename, *offset);
-                files_and_offsets
-            });
+        fdi.entry(directory).or_default().insert(filename, *offset);
     }
 
     writer.write_u32::<LE>(fdi.len() as u32)?;
