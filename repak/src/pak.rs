@@ -205,6 +205,10 @@ impl PakReader {
         self.pak.encryption_guid
     }
 
+    pub fn path_hash_seed(&self) -> Option<u64> {
+        self.pak.index.path_hash_seed
+    }
+
     pub fn get<R: Read + Seek>(&self, path: &str, reader: &mut R) -> Result<Vec<u8>, super::Error> {
         let mut data = Vec::new();
         self.read_file(path, reader, &mut data)?;
