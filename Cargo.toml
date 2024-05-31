@@ -11,9 +11,9 @@ edition = "2021"
 keywords = ["unreal-engine", "pak", "unrealpak"]
 
 [workspace.dependencies]
-aes = "0.8.2"
-base64 = "0.21.0"
-strum = { version = "0.24", features = ["derive"] }
+aes = "0.8.4"
+base64 = "0.22.1"
+strum = { version = "0.26", features = ["derive"] }
 sha1 = "0.10"
 hex = "0.4"
 

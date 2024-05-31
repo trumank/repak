@@ -25,18 +25,18 @@ oodle = ["repak/oodle_implicit_dynamic"]
 repak = { path = "../repak" }
 aes = { workspace = true }
 base64 = { workspace = true }
-clap = { version = "4.1.4", features = ["derive"] }
+clap = { version = "4.5.4", features = ["derive"] }
 hex = { workspace = true }
-indicatif = { version = "0.17.3", features = ["rayon"] }
-path-clean = "0.1.0"
+indicatif = { version = "0.17.8", features = ["rayon"] }
+path-clean = "1.0.1"
 path-slash = "0.2.1"
-rayon = "1.6.1"
-sha2 = "0.10.7"
+rayon = "1.10.0"
+sha2 = "0.10.8"
 strum = { workspace = true }
-itertools = "0.12.0"
+itertools = "0.13.0"
 
 [dev-dependencies]
-assert_cmd = "2.0.12"
+assert_cmd = "2.0.14"
 dir-diff = "0.3.3"
 indoc = "2.0.5"
 tempfile = "3.10.1"

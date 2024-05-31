@@ -7,17 +7,17 @@ version.workspace = true
 edition.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-libloading = "0.7"
+libloading = "0.8"
 
 [target.'cfg(unix)'.dependencies]
-object = { version = "0.32.1", default-features = false, features = ["std", "read"] }
-libc = "0.2.148"
+object = { version = "0.36.0", default-features = false, features = ["std", "read"] }
+libc = "0.2.155"
 seq-macro = "0.3.5"
 
 [dependencies]
 sha1 = { workspace = true }
-ureq = "2.6"
+ureq = "2.9"
 hex-literal = "0.4"
 hex = { workspace = true }
-anyhow = "1.0.75"
+anyhow = "1.0.86"
 lzma-rs = "0.3.0"

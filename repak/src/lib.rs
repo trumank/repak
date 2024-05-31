@@ -29,7 +29,7 @@ pub use oodle_loader;
     strum::FromRepr,
     strum::EnumIter,
     strum::EnumString,
-    strum::EnumVariantNames,
+    strum::VariantNames,
 )]
 pub enum Version {
     V0,
@@ -120,7 +120,7 @@ impl Version {
 }
 
 #[derive(
-    Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString, strum::EnumVariantNames,
+    Clone, Copy, PartialEq, Eq, Debug, strum::Display, strum::EnumString, strum::VariantNames,
 )]
 pub enum Compression {
     Zlib,
