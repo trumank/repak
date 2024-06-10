@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::{Error, KEY};
 
 use super::{ext::BoolExt, ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -206,11 +206,23 @@ impl Entry {
 
         entry.write(writer, version, EntryLocation::Data)?;
 
-        if let Some(compressed) = compressed {
-            writer.write_all(&compressed)?;
+        let inv = compression.is_some();
+        let mut data = if let Some(compressed) = compressed {
+            compressed
         } else {
-            writer.write_all(data.as_ref())?;
+            data.as_ref().to_vec()
+        };
+
+        let mut j = 0;
+        for d in &mut data {
+            *d = *d ^ KEY[j % KEY.len()];
+            if inv {
+                *d = !*d;
+            }
+            j += 1;
         }
+
+        writer.write_all(&data)?;
 
         Ok(entry)
     }
@@ -483,6 +495,21 @@ impl Entry {
                 None => vec![0..data.len()],
             }
         };
+
+        let inv = self
+            .compression_slot
+            .and_then(|c| compression[c as usize])
+            .is_some();
+        for range in &ranges {
+            let mut j = 0;
+            for i in range.clone() {
+                data[i] = data[i] ^ KEY[j % KEY.len()];
+                if inv {
+                    data[i] = !data[i]
+                }
+                j += 1;
+            }
+        }
 
         #[cfg(feature = "compression")]
         macro_rules! decompress {

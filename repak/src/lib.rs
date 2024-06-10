@@ -9,6 +9,8 @@ pub use {error::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
 
+const KEY: &'static [u8] = b"\xDE\xAD\xFA\xDE\xBE\xEF\xCA\xFE";
+
 #[cfg(feature = "oodle")]
 mod oodle {
     pub type OodleGetter = fn() -> Result<OodleDecompress, Box<dyn std::error::Error>>;

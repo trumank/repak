@@ -424,7 +424,7 @@ impl Pak {
             let mut entries = BTreeMap::new();
             for _ in 0..len {
                 entries.insert(
-                    index.read_string()?,
+                    index.read_string_xor()?,
                     super::entry::Entry::read(&mut index, version)?,
                 );
             }
@@ -460,7 +460,7 @@ impl Pak {
             let record_count = self.index.entries.len() as u32;
             index_writer.write_u32::<LE>(record_count)?;
             for (path, entry) in &self.index.entries {
-                index_writer.write_string(path)?;
+                index_writer.write_string_xor(path)?;
                 entry.write(
                     &mut index_writer,
                     self.version,
