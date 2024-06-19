@@ -1,2 +1,6 @@
 *target/
 /repak/tests/config.sh
+/repak_cs/RePak/bin
+/repak_cs/RePak/obj
+/repak_cs/RePak.Tests/bin
+/repak_cs/RePak.Tests/obj
