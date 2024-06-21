@@ -10,21 +10,23 @@ public class UnitTest1
     {
         RePakInterop.pak_setup_allocator();
 
-        var stream = new MemoryStream();
-
         var key = Convert.FromBase64String("lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=");
 
         using (PakBuilder builder = new PakBuilder())
         {
-            using (var writer = builder.Writer(stream))
+            builder.Compression(new Compression[] { Compression.Zlib });
+            using (var stream = new FileStream("output.pak", FileMode.Create))
             {
-                writer.WriteFile("a_file1.txt", Encoding.ASCII.GetBytes("some file contents"));
-                writer.WriteFile("a_file2.txt", Encoding.ASCII.GetBytes("another file with contents"));
-                writer.WriteFile("a_file3.txt", Encoding.ASCII.GetBytes("last file with some contents"));
-                writer.WriteFile("a_file4.txt", Encoding.ASCII.GetBytes("lol jk one more"));
-                writer.WriteIndex();
+                using (var writer = builder.Writer(stream))
+                {
+                    writer.WriteFile("a_file1.txt", Encoding.ASCII.GetBytes("some file contents"));
+                    writer.WriteFile("a_file2.txt", Encoding.ASCII.GetBytes("another file with contents"));
+                    writer.WriteFile("a_file3.txt", Encoding.ASCII.GetBytes("last file with some contents"));
+                    writer.WriteFile("a_file4.txt", Encoding.ASCII.GetBytes("lol jk one more"));
+                    writer.WriteIndex();
+                }
+                Console.WriteLine($"Bytes written={stream.Length}");
             }
-            Console.WriteLine($"Bytes written={stream.Length}");
         }
 
         using (PakBuilder builder = new PakBuilder())

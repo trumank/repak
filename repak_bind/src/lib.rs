@@ -1,5 +1,6 @@
 mod alloc;
 
+use repak::Compression;
 use repak::PakBuilder;
 use repak::PakReader;
 use repak::PakWriter;
@@ -111,12 +112,16 @@ pub extern "C" fn pak_builder_key(builder: *mut PakBuilder, key: &[u8; 32]) -> *
     Box::into_raw(Box::new(builder))
 }
 
-//#[no_mangle]
-//pub extern "C" fn pak_builder_compression(builder: *mut PakBuilder, compressions: *const Compression, count: usize) -> *mut PakBuilder {
-//    let compressions = unsafe { std::slice::from_raw_parts(compressions, count) };
-//    let builder = unsafe { Box::from_raw(builder) }.compression(compressions.to_vec());
-//    Box::into_raw(Box::new(builder))
-//}
+#[no_mangle]
+pub unsafe extern "C" fn pak_builder_compression(
+    builder: *mut PakBuilder,
+    compressions: *const Compression,
+    length: usize,
+) -> *mut PakBuilder {
+    let compressions = std::slice::from_raw_parts(compressions, length);
+    let builder = Box::from_raw(builder).compression(compressions.to_vec());
+    Box::into_raw(Box::new(builder))
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn pak_builder_reader(
@@ -126,7 +131,10 @@ pub unsafe extern "C" fn pak_builder_reader(
     let mut stream = Stream::new(ctx);
     match Box::from_raw(builder).reader(&mut stream) {
         Ok(reader) => Box::into_raw(Box::new(reader)),
-        Err(e) => {println!("{e}");std::ptr::null_mut()},
+        Err(e) => {
+            println!("{e}");
+            std::ptr::null_mut()
+        }
     }
 }
 

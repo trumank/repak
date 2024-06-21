@@ -50,14 +50,11 @@ public class PakBuilder : SafeHandleZeroOrMinusOneIsInvalid
         return this;
     }
 
-    //public PakBuilder Compression(Compression[] compressions)
-    //{
-    //    IntPtr compressionsPtr = Marshal.AllocHGlobal(compressions.Length * Marshal.SizeOf<Compression>());
-    //    Marshal.Copy(compressions, 0, compressionsPtr, compressions.Length);
-    //    _handle = PakBuilderInterop.pak_builder_compression(_handle, compressionsPtr, compressions.Length);
-    //    Marshal.FreeHGlobal(compressionsPtr);
-    //    return this;
-    //}
+    public PakBuilder Compression(Compression[] compressions)
+    {
+        SetHandle(RePakInterop.pak_builder_compression(handle, compressions.Select(c => Convert.ToByte(c)).ToArray(), compressions.Length));
+        return this;
+    }
 
     public PakWriter Writer(Stream stream, Version version = Version.V11, string mountPoint = "../../../", ulong pathHashSeed = 0)
     {
