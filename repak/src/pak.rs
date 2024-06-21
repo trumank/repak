@@ -7,6 +7,11 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
 
+#[cfg(feature = "encryption")]
+pub mod encryption {
+    pub use aes::{cipher::KeyInit, Aes256};
+}
+
 #[derive(Debug)]
 pub struct PakBuilder {
     key: super::Key,

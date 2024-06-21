@@ -12,11 +12,16 @@ public class UnitTest1
 
         var stream = new MemoryStream();
 
+        var key = Convert.FromBase64String("lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=");
+
         using (PakBuilder builder = new PakBuilder())
         {
             using (var writer = builder.Writer(stream))
             {
-                writer.WriteFile("a_file.txt", Encoding.ASCII.GetBytes("some file contents\n"));
+                writer.WriteFile("a_file1.txt", Encoding.ASCII.GetBytes("some file contents"));
+                writer.WriteFile("a_file2.txt", Encoding.ASCII.GetBytes("another file with contents"));
+                writer.WriteFile("a_file3.txt", Encoding.ASCII.GetBytes("last file with some contents"));
+                writer.WriteFile("a_file4.txt", Encoding.ASCII.GetBytes("lol jk one more"));
                 writer.WriteIndex();
             }
             Console.WriteLine($"Bytes written={stream.Length}");
@@ -24,8 +29,16 @@ public class UnitTest1
 
         using (PakBuilder builder = new PakBuilder())
         {
-            using (var reader = builder.Reader(stream)) {
-                reader.Get(stream, "a_file.txt");
+            using (var fileStream = new FileStream("../../../../../repak/tests/packs/pack_v11_compress_encrypt_encryptindex.pak", FileMode.Open))
+            {
+                builder.Key(key);
+                using (var reader = builder.Reader(fileStream))
+                {
+                    foreach (var file in reader.Files())
+                    {
+                        Console.WriteLine($"File={file} Contents={Encoding.ASCII.GetString(reader.Get(fileStream, file))}");
+                    }
+                }
             }
         }
 

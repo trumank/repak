@@ -25,8 +25,8 @@ public class RePakInterop
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     public static extern void pak_buffer_drop(IntPtr buffer, ulong length);
 
-    //[DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
-    //public static extern IntPtr pak_builder_key(IntPtr builder, Aes256 key);
+    [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr pak_builder_key(IntPtr builder, byte[] key);
     //[DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     //public static extern IntPtr pak_builder_compression(IntPtr builder, IntPtr compressions, int count);
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
@@ -37,7 +37,9 @@ public class RePakInterop
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     public static extern int pak_reader_get(IntPtr reader, string path, StreamCallbacks ctx, out IntPtr buffer, out ulong length);
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
-    public static extern IntPtr pak_reader_files(IntPtr reader);
+    public static extern IntPtr pak_reader_files(IntPtr reader, out ulong length);
+    [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr pak_drop_files(IntPtr buffer, ulong length);
 
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     public static extern int pak_writer_write_file(IntPtr writer, string path, byte[] data, int data_len);

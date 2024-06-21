@@ -102,13 +102,14 @@ pub unsafe extern "C" fn pak_buffer_drop(buf: *mut u8, len: usize) {
     drop(Box::from_raw(std::slice::from_raw_parts_mut(buf, len)));
 }
 
-//#[no_mangle]
-//pub extern "C" fn pak_builder_key(builder: *mut PakBuilder, key: Aes256) -> *mut PakBuilder {
-//    unsafe {
-//        let builder = Box::from_raw(builder).key(key);
-//        Box::into_raw(Box::new(builder))
-//    }
-//}
+#[no_mangle]
+pub extern "C" fn pak_builder_key(builder: *mut PakBuilder, key: &[u8; 32]) -> *mut PakBuilder {
+    use repak::encryption::KeyInit;
+    let builder = unsafe { Box::from_raw(builder) }
+        .key(repak::encryption::Aes256::new_from_slice(key).unwrap());
+    println!("key = {key:X?}");
+    Box::into_raw(Box::new(builder))
+}
 
 //#[no_mangle]
 //pub extern "C" fn pak_builder_compression(builder: *mut PakBuilder, compressions: *const Compression, count: usize) -> *mut PakBuilder {
@@ -125,10 +126,7 @@ pub unsafe extern "C" fn pak_builder_reader(
     let mut stream = Stream::new(ctx);
     match Box::from_raw(builder).reader(&mut stream) {
         Ok(reader) => Box::into_raw(Box::new(reader)),
-        Err(e) => {
-            println!("Error = {e}");
-            std::ptr::null_mut()
-        }
+        Err(e) => {println!("{e}");std::ptr::null_mut()},
     }
 }
 
@@ -185,16 +183,25 @@ pub extern "C" fn pak_reader_get(
 }
 
 #[no_mangle]
-pub extern "C" fn pak_reader_files(reader: &PakReader) -> *mut *mut c_char {
-    let files = reader.files();
-    let mut c_files: Vec<*mut c_char> = files
+pub extern "C" fn pak_reader_files(reader: &PakReader, len: &mut usize) -> *mut *mut c_char {
+    let c_files: Vec<*mut c_char> = reader
+        .files()
         .into_iter()
         .map(|file| CString::new(file).unwrap().into_raw())
         .collect();
-    c_files.push(std::ptr::null_mut());
-    let ptr = c_files.as_mut_ptr();
-    std::mem::forget(c_files);
-    ptr
+    let buf: Box<[*mut c_char]> = c_files.into_boxed_slice();
+    *len = buf.len();
+    Box::into_raw(buf) as *mut *mut c_char
+}
+#[no_mangle]
+pub unsafe extern "C" fn pak_drop_files(buf: *mut *mut c_char, len: usize) {
+    let boxed_slice: Box<[*mut c_char]> = Box::from_raw(std::slice::from_raw_parts_mut(buf, len));
+
+    for i in 0..len {
+        if !boxed_slice[i].is_null() {
+            drop(CString::from_raw(boxed_slice[i]));
+        }
+    }
 }
 
 #[no_mangle]
@@ -208,10 +215,7 @@ pub unsafe extern "C" fn pak_writer_write_file(
     let data = unsafe { std::slice::from_raw_parts(data, data_len) };
     match unsafe { &mut *writer }.write_file(path, data) {
         Ok(_) => 0,
-        Err(e) => {
-            println!("Error = {e}");
-            1
-        }
+        Err(_) => 1,
     }
 }
 
