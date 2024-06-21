@@ -36,6 +36,8 @@ public class UnitTest1
                 builder.Key(key);
                 using (var reader = builder.Reader(fileStream))
                 {
+                    Console.WriteLine($"MountPoint = {reader.MountPoint()}");
+                    Console.WriteLine($"Version = {reader.Version()}");
                     foreach (var file in reader.Files())
                     {
                         Console.WriteLine($"File={file} Contents={Encoding.ASCII.GetString(reader.Get(fileStream, file))}");

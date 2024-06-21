@@ -61,7 +61,7 @@ pub unsafe extern "C" fn pak_setup_allocator() {
     let _ = AllocationRegistry::set_global_tracker(StdoutTracker)
         .expect("no other global tracker should be set yet");
 
-    //AllocationRegistry::enable_tracking();
+    AllocationRegistry::enable_tracking();
 }
 
 #[no_mangle]

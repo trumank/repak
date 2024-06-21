@@ -24,6 +24,8 @@ public class RePakInterop
     public static extern void pak_writer_drop(IntPtr writer);
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     public static extern void pak_buffer_drop(IntPtr buffer, ulong length);
+    [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void pak_cstring_drop(IntPtr cstrign);
 
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr pak_builder_key(IntPtr builder, byte[] key);
@@ -34,6 +36,10 @@ public class RePakInterop
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr pak_builder_writer(IntPtr builder, StreamCallbacks ctx, Version version, string mount_point, ulong path_hash_seed = 0);
 
+    [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern Version pak_reader_version(IntPtr reader);
+    [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr pak_reader_mount_point(IntPtr reader);
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]
     public static extern int pak_reader_get(IntPtr reader, string path, StreamCallbacks ctx, out IntPtr buffer, out ulong length);
     [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl)]

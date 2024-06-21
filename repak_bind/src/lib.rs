@@ -4,6 +4,7 @@ use repak::Compression;
 use repak::PakBuilder;
 use repak::PakReader;
 use repak::PakWriter;
+use repak::Version;
 use std::ffi::CString;
 use std::io::Read;
 use std::io::SeekFrom;
@@ -87,20 +88,21 @@ pub unsafe extern "C" fn pak_builder_new() -> *mut PakBuilder {
 pub unsafe extern "C" fn pak_builder_drop(builder: *mut PakBuilder) {
     drop(Box::from_raw(builder))
 }
-
 #[no_mangle]
 pub unsafe extern "C" fn pak_reader_drop(reader: *mut PakReader) {
     drop(Box::from_raw(reader))
 }
-
 #[no_mangle]
 pub unsafe extern "C" fn pak_writer_drop(writer: *mut PakWriter<Stream>) {
     drop(Box::from_raw(writer))
 }
-
 #[no_mangle]
 pub unsafe extern "C" fn pak_buffer_drop(buf: *mut u8, len: usize) {
     drop(Box::from_raw(std::slice::from_raw_parts_mut(buf, len)));
+}
+#[no_mangle]
+pub unsafe extern "C" fn pak_cstring_drop(cstring: *mut c_char) {
+    drop(CString::from_raw(cstring))
 }
 
 #[no_mangle]
@@ -138,18 +140,6 @@ pub unsafe extern "C" fn pak_builder_reader(
     }
 }
 
-//#[no_mangle]
-//pub extern "C" fn pak_builder_reader_with_version(builder: *mut PakBuilder, reader_ctx: *mut ReaderContext, version: Version) -> *mut PakReader {
-//    let reader_ctx = unsafe { &*reader_ctx };
-//    let reader = ReaderWithCallback {
-//        context: reader_ctx.reader,
-//        read_callback: reader_ctx.read_cb,
-//        seek_callback: reader_ctx.seek_cb,
-//    };
-//    let reader = unsafe { Box::from_raw(builder) }.reader_with_version(&mut reader, version).unwrap();
-//    Box::into_raw(Box::new(reader))
-//}
-
 #[no_mangle]
 pub unsafe extern "C" fn pak_builder_writer(
     builder: *mut PakBuilder,
@@ -167,6 +157,16 @@ pub unsafe extern "C" fn pak_builder_writer(
         Some(path_hash_seed),
     );
     Box::into_raw(Box::new(writer))
+}
+
+#[no_mangle]
+pub extern "C" fn pak_reader_version(reader: &PakReader) -> Version {
+    reader.version()
+}
+
+#[no_mangle]
+pub extern "C" fn pak_reader_mount_point(reader: &PakReader) -> *const c_char {
+    CString::new(reader.mount_point()).unwrap().into_raw()
 }
 
 #[no_mangle]

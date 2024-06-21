@@ -107,6 +107,7 @@ public class PakWriter : SafeHandleZeroOrMinusOneIsInvalid
 
     public void WriteFile(string path, byte[] data)
     {
+        if (handle == IntPtr.Zero) throw new Exception("PakWriter handle invalid");
         int result = RePakInterop.pak_writer_write_file(handle, path, data, data.Length);
         if (result != 0) throw new Exception("Failed to write file");
     }
@@ -138,8 +139,29 @@ public class PakReader : SafeHandleZeroOrMinusOneIsInvalid
         return true;
     }
 
+    public string MountPoint()
+    {
+        if (handle == IntPtr.Zero) throw new Exception("PakReader handle invalid");
+
+        var cstring = RePakInterop.pak_reader_mount_point(handle);
+        var mountPoint = Marshal.PtrToStringAnsi(cstring);
+
+        RePakInterop.pak_cstring_drop(cstring);
+
+        return mountPoint;
+    }
+
+    public Version Version()
+    {
+        if (handle == IntPtr.Zero) throw new Exception("PakReader handle invalid");
+
+        return RePakInterop.pak_reader_version(handle);
+    }
+
     public byte[] Get(Stream stream, string path)
     {
+        if (handle == IntPtr.Zero) throw new Exception("PakReader handle invalid");
+
         var streamCtx = StreamCallbacks.Create(stream);
 
         IntPtr bufferPtr;
@@ -160,6 +182,8 @@ public class PakReader : SafeHandleZeroOrMinusOneIsInvalid
 
     public string[] Files()
     {
+        if (handle == IntPtr.Zero) throw new Exception("PakReader handle invalid");
+
         ulong length;
         IntPtr filesPtr = RePakInterop.pak_reader_files(handle, out length);
         var files = new List<string>();
@@ -221,9 +245,10 @@ public class StreamCallbacks
             stream.Write(bufferManaged, 0, bufferLen);
             return bufferLen;
         }
-        catch
+        catch (Exception e)
         {
-            return 0; // or handle error
+            Console.WriteLine($"Error during write {e}");
+            return -1;
         }
     }
 
@@ -235,9 +260,10 @@ public class StreamCallbacks
             long newPosition = stream.Seek(offset, (SeekOrigin)origin);
             return (ulong)newPosition;
         }
-        catch
+        catch (Exception e)
         {
-            return ulong.MaxValue; // or handle error
+            Console.WriteLine($"Error during seek {e}");
+            return ulong.MaxValue;
         }
     }
 
@@ -247,11 +273,12 @@ public class StreamCallbacks
         try
         {
             stream.Flush();
-            return 0; // success
+            return 0;
         }
-        catch
+        catch (Exception e)
         {
-            return 1; // or handle error
+            Console.WriteLine($"Error during flush {e}");
+            return 1;
         }
     }
 }
