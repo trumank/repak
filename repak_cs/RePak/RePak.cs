@@ -30,7 +30,6 @@ public enum Compression : byte
     Zstd
 }
 
-
 public class PakBuilder : SafeHandleZeroOrMinusOneIsInvalid
 {
     public PakBuilder() : base(true)
@@ -134,12 +133,11 @@ public class PakReader : SafeHandleZeroOrMinusOneIsInvalid
 
     protected override bool ReleaseHandle()
     {
-        Console.WriteLine("dropping reader");
         RePakInterop.pak_reader_drop(handle);
         return true;
     }
 
-    public string MountPoint()
+    public string GetMountPoint()
     {
         if (handle == IntPtr.Zero) throw new Exception("PakReader handle invalid");
 
@@ -151,7 +149,7 @@ public class PakReader : SafeHandleZeroOrMinusOneIsInvalid
         return mountPoint;
     }
 
-    public Version Version()
+    public Version GetVersion()
     {
         if (handle == IntPtr.Zero) throw new Exception("PakReader handle invalid");
 
@@ -187,11 +185,10 @@ public class PakReader : SafeHandleZeroOrMinusOneIsInvalid
         ulong length;
         IntPtr filesPtr = RePakInterop.pak_reader_files(handle, out length);
         var files = new List<string>();
-        IntPtr currentPtr = Marshal.ReadIntPtr(filesPtr);
         for (ulong i = 0; i < length; i++)
         {
+            IntPtr currentPtr = Marshal.ReadIntPtr(filesPtr, (int)i * IntPtr.Size);
             files.Add(Marshal.PtrToStringAnsi(currentPtr));
-            currentPtr = Marshal.ReadIntPtr(filesPtr, (int)i * IntPtr.Size);
         }
         RePakInterop.pak_drop_files(filesPtr, length);
         return files.ToArray();

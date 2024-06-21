@@ -1,7 +1,6 @@
 namespace RePak;
 
 using System;
-using System.IO;
 using System.Runtime.InteropServices;
 
 public class RePakInterop

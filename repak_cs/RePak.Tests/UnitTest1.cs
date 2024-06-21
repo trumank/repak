@@ -6,10 +6,8 @@ using System.Text;
 public class UnitTest1
 {
     [Fact]
-    public void TestFinalizer()
+    public void TestLeaks()
     {
-        RePakInterop.pak_setup_allocator();
-
         var key = Convert.FromBase64String("lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=");
 
         using (PakBuilder builder = new PakBuilder())
@@ -36,11 +34,11 @@ public class UnitTest1
                 builder.Key(key);
                 using (var reader = builder.Reader(fileStream))
                 {
-                    Console.WriteLine($"MountPoint = {reader.MountPoint()}");
-                    Console.WriteLine($"Version = {reader.Version()}");
+                    Console.WriteLine($"MountPoint = {reader.GetMountPoint()}");
+                    Console.WriteLine($"Version = {reader.GetVersion()}");
                     foreach (var file in reader.Files())
                     {
-                        Console.WriteLine($"File={file} Contents={Encoding.ASCII.GetString(reader.Get(fileStream, file))}");
+                        Console.WriteLine($"File={file} Contents={Encoding.ASCII.GetString(reader.Get(fileStream, file)).Substring(0, 10)}...");
                     }
                 }
             }
@@ -48,9 +46,6 @@ public class UnitTest1
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
-        Console.WriteLine("huh");
-
-        RePakInterop.pak_teardown_allocator();
     }
 
     [Fact]

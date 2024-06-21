@@ -1,5 +1,3 @@
-mod alloc;
-
 use repak::Compression;
 use repak::PakBuilder;
 use repak::PakReader;
@@ -106,11 +104,13 @@ pub unsafe extern "C" fn pak_cstring_drop(cstring: *mut c_char) {
 }
 
 #[no_mangle]
-pub extern "C" fn pak_builder_key(builder: *mut PakBuilder, key: &[u8; 32]) -> *mut PakBuilder {
+pub unsafe extern "C" fn pak_builder_key(
+    builder: *mut PakBuilder,
+    key: &[u8; 32],
+) -> *mut PakBuilder {
     use repak::encryption::KeyInit;
-    let builder = unsafe { Box::from_raw(builder) }
-        .key(repak::encryption::Aes256::new_from_slice(key).unwrap());
-    println!("key = {key:X?}");
+    let builder =
+        Box::from_raw(builder).key(repak::encryption::Aes256::new_from_slice(key).unwrap());
     Box::into_raw(Box::new(builder))
 }
 
@@ -133,8 +133,7 @@ pub unsafe extern "C" fn pak_builder_reader(
     let mut stream = Stream::new(ctx);
     match Box::from_raw(builder).reader(&mut stream) {
         Ok(reader) => Box::into_raw(Box::new(reader)),
-        Err(e) => {
-            println!("{e}");
+        Err(_) => {
             std::ptr::null_mut()
         }
     }
@@ -170,7 +169,7 @@ pub extern "C" fn pak_reader_mount_point(reader: &PakReader) -> *const c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn pak_reader_get(
+pub unsafe extern "C" fn pak_reader_get(
     reader: &PakReader,
     path: *const c_char,
     ctx: StreamCallbacks,
