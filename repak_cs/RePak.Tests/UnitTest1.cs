@@ -8,15 +8,32 @@ public class UnitTest1
     [Fact]
     public void TestFinalizer()
     {
-        RePak.PakBuilder? builder = null;
-        for (var i = 0; i < 2; i++)
+        RePakInterop.pak_setup_allocator();
+
+        var stream = new MemoryStream();
+
+        using (PakBuilder builder = new PakBuilder())
         {
-            builder = new RePak.PakBuilder();
+            using (var writer = builder.Writer(stream))
+            {
+                writer.WriteFile("a_file.txt", Encoding.ASCII.GetBytes("some file contents\n"));
+                writer.WriteIndex();
+            }
+            Console.WriteLine($"Bytes written={stream.Length}");
+        }
+
+        using (PakBuilder builder = new PakBuilder())
+        {
+            using (var reader = builder.Reader(stream)) {
+                reader.Get(stream, "a_file.txt");
+            }
         }
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
         Console.WriteLine("huh");
+
+        RePakInterop.pak_teardown_allocator();
     }
 
     [Fact]
@@ -37,7 +54,8 @@ public class UnitTest1
         {
             var builder = new RePak.PakBuilder();
             var pak_reader = builder.Reader(stream);
-            foreach (var file in pak_reader.Files()) {
+            foreach (var file in pak_reader.Files())
+            {
                 Console.WriteLine($"File: {file}");
                 var bytes = pak_reader.Get(stream, file);
                 Console.WriteLine($"Contents: {Encoding.ASCII.GetString(bytes)}");

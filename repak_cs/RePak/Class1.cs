@@ -3,6 +3,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 public enum Version : byte
 {
@@ -30,20 +31,16 @@ public enum Compression : byte
 }
 
 
-public class PakBuilder
+public class PakBuilder : SafeHandleZeroOrMinusOneIsInvalid
 {
-    private IntPtr _handle;
-
-    public PakBuilder()
+    public PakBuilder() : base(true)
     {
-        _handle = RePakInterop.pak_builder_new();
+        SetHandle(RePakInterop.pak_builder_new());
     }
-
-    ~PakBuilder()
+    protected override bool ReleaseHandle()
     {
-        if (_handle == IntPtr.Zero) return;
-
-        RePakInterop.pak_builder_drop(_handle);
+        RePakInterop.pak_builder_drop(handle);
+        return true;
     }
 
     //public PakBuilder Key(Aes256 key)
@@ -63,7 +60,7 @@ public class PakBuilder
 
     public PakWriter Writer(Stream stream, Version version = Version.V11, string mountPoint = "../../../", ulong pathHashSeed = 0)
     {
-        if (_handle == IntPtr.Zero) throw new Exception("PakBuilder handle invalid");
+        if (handle == IntPtr.Zero) throw new Exception("PakBuilder handle invalid");
 
         var streamCtx = new RePakInterop.StreamCallbacks
         {
@@ -74,14 +71,18 @@ public class PakBuilder
             FlushCb = StreamCallbacks.FlushCallback
         };
 
-        IntPtr writerHandle = RePakInterop.pak_builder_writer(_handle, streamCtx, version, mountPoint, pathHashSeed);
-        _handle = IntPtr.Zero; // pak_builder_writer consumes the builder
+        IntPtr writerHandle = RePakInterop.pak_builder_writer(handle, streamCtx, version, mountPoint, pathHashSeed);
+
+        // pak_builder_reader consumes the builder
+        SetHandleAsInvalid();
+        SetHandle(IntPtr.Zero);
+
         return new PakWriter(writerHandle, stream);
     }
 
     public PakReader Reader(Stream stream)
     {
-        if (_handle == IntPtr.Zero) throw new Exception("PakBuilder handle invalid");
+        if (handle == IntPtr.Zero) throw new Exception("PakBuilder handle invalid");
 
         var streamCtx = new RePakInterop.StreamCallbacks
         {
@@ -92,27 +93,37 @@ public class PakBuilder
             FlushCb = StreamCallbacks.FlushCallback
         };
 
-        IntPtr readerHandle = RePakInterop.pak_builder_reader(_handle, streamCtx);
-        _handle = IntPtr.Zero; // pak_builder_reader consumes the builder
+        IntPtr readerHandle = RePakInterop.pak_builder_reader(handle, streamCtx);
+
+        // pak_builder_reader consumes the builder
+        SetHandleAsInvalid();
+        SetHandle(IntPtr.Zero);
+
         if (readerHandle == IntPtr.Zero) throw new Exception("Failed to create PakReader");
         return new PakReader(readerHandle, stream);
     }
 }
 
-public class PakWriter : IDisposable
+public class PakWriter : SafeHandleZeroOrMinusOneIsInvalid
 {
-    private IntPtr _handle;
     private Stream _stream;
 
-    public PakWriter(IntPtr handle, Stream stream)
+    public PakWriter(IntPtr handle, Stream stream) : base(true)
     {
-        _handle = handle;
+        SetHandle(handle);
+
+        // hold a ref to the stream to ensure it remains valid for the lifetime of the writer
         _stream = stream;
+    }
+    protected override bool ReleaseHandle()
+    {
+        RePakInterop.pak_writer_drop(handle);
+        return true;
     }
 
     public void WriteFile(string path, byte[] data)
     {
-        int result = RePakInterop.pak_writer_write_file(_handle, path, data, data.Length);
+        int result = RePakInterop.pak_writer_write_file(handle, path, data, data.Length);
         if (result != 0)
         {
             throw new Exception("Failed to write file");
@@ -121,41 +132,44 @@ public class PakWriter : IDisposable
 
     public void WriteIndex()
     {
-        int result = RePakInterop.pak_writer_write_index(_handle);
+        int result = RePakInterop.pak_writer_write_index(handle);
+
+        // write_index drops the writer
+        SetHandleAsInvalid();
+        SetHandle(IntPtr.Zero);
+
+        //GCHandle.FromIntPtr(StreamCtx.Context).Free();
+
         if (result != 0)
         {
             throw new Exception("Failed to write index");
         }
     }
-
-    public void Dispose()
-    {
-    }
 }
 
-public class PakReader : IDisposable
+public class PakReader : SafeHandleZeroOrMinusOneIsInvalid
 {
-    private IntPtr _handle;
-
-    public PakReader(IntPtr handle, Stream stream)
+    public PakReader(IntPtr handle, Stream stream) : base(true)
     {
-        _handle = handle;
+        SetHandle(handle);
+    }
+
+    protected override bool ReleaseHandle()
+    {
+        Console.WriteLine("dropping reader");
+        RePakInterop.pak_reader_drop(handle);
+        return true;
     }
 
     public byte[] Get(Stream stream, string path)
     {
-        var streamCtx = new RePakInterop.StreamCallbacks
-        {
-            Context = GCHandle.ToIntPtr(GCHandle.Alloc(stream)),
-            ReadCb = StreamCallbacks.ReadCallback,
-            WriteCb = StreamCallbacks.WriteCallback,
-            SeekCb = StreamCallbacks.SeekCallback,
-            FlushCb = StreamCallbacks.FlushCallback
-        };
+        var streamCtx = StreamCallbacks.Create(stream);
 
         IntPtr bufferPtr;
-        int length;
-        int result = RePakInterop.pak_reader_get(_handle, path, streamCtx, out bufferPtr, out length);
+        ulong length;
+        int result = RePakInterop.pak_reader_get(handle, path, streamCtx, out bufferPtr, out length);
+
+        GCHandle.FromIntPtr(streamCtx.Context).Free();
 
         if (result != 0)
         {
@@ -163,14 +177,16 @@ public class PakReader : IDisposable
         }
 
         byte[] buffer = new byte[length];
-        Marshal.Copy(bufferPtr, buffer, 0, length);
-        // TODO free buffer
+        Marshal.Copy(bufferPtr, buffer, 0, (int)length);
+
+        RePakInterop.pak_buffer_drop(bufferPtr, length);
+
         return buffer;
     }
 
     public string[] Files()
     {
-        IntPtr filesPtr = RePakInterop.pak_reader_files(_handle);
+        IntPtr filesPtr = RePakInterop.pak_reader_files(handle);
         var files = new List<string>();
         int index = 0;
         IntPtr currentPtr = Marshal.ReadIntPtr(filesPtr);
@@ -183,15 +199,23 @@ public class PakReader : IDisposable
         // TODO free buffer
         return files.ToArray();
     }
-
-    public void Dispose()
-    {
-    }
 }
 
 
 public class StreamCallbacks
 {
+    public static RePakInterop.StreamCallbacks Create(Stream stream)
+    {
+        return new RePakInterop.StreamCallbacks
+        {
+            Context = GCHandle.ToIntPtr(GCHandle.Alloc(stream)),
+            ReadCb = StreamCallbacks.ReadCallback,
+            WriteCb = StreamCallbacks.WriteCallback,
+            SeekCb = StreamCallbacks.SeekCallback,
+            FlushCb = StreamCallbacks.FlushCallback
+        };
+    }
+
     public static long ReadCallback(IntPtr context, IntPtr buffer, ulong bufferLen)
     {
         var stream = (Stream)GCHandle.FromIntPtr(context).Target;

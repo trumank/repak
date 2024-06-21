@@ -1,3 +1,5 @@
+mod alloc;
+
 use repak::PakBuilder;
 use repak::PakReader;
 use repak::PakWriter;
@@ -85,6 +87,21 @@ pub unsafe extern "C" fn pak_builder_drop(builder: *mut PakBuilder) {
     drop(Box::from_raw(builder))
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn pak_reader_drop(reader: *mut PakReader) {
+    drop(Box::from_raw(reader))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pak_writer_drop(writer: *mut PakWriter<Stream>) {
+    drop(Box::from_raw(writer))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pak_buffer_drop(buf: *mut u8, len: usize) {
+    drop(Box::from_raw(std::slice::from_raw_parts_mut(buf, len)));
+}
+
 //#[no_mangle]
 //pub extern "C" fn pak_builder_key(builder: *mut PakBuilder, key: Aes256) -> *mut PakBuilder {
 //    unsafe {
@@ -151,18 +168,16 @@ pub extern "C" fn pak_reader_get(
     reader: &PakReader,
     path: *const c_char,
     ctx: StreamCallbacks,
-    buffer: *mut *mut u8,
-    length: *mut usize,
+    buffer: &mut *mut u8,
+    length: &mut usize,
 ) -> i32 {
     let path = unsafe { CStr::from_ptr(path) }.to_str().unwrap();
     match reader.get(path, &mut Stream::new(ctx)) {
         Ok(data) => {
-            let len = data.len();
             let buf = data.into_boxed_slice();
-            unsafe {
-                *buffer = Box::into_raw(buf) as *mut u8;
-                *length = len;
-            }
+            let len = buf.len();
+            *buffer = Box::into_raw(buf) as *mut u8;
+            *length = len;
             0
         }
         Err(_) => 1,

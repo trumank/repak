@@ -12,3 +12,4 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 repak = { version = "0.2.1", path = "../repak" }
+tracking-allocator = "0.4.0"
