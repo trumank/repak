@@ -46,12 +46,19 @@ where
         let read = self.inner.read(buf);
         if let Ok(read) = read {
             for _ in 0..read {
+                let save = self.reads.position();
                 let r = match self.reads.read_u8() {
                     Ok(r) => {
                         self.reads.seek(SeekFrom::Current(-1)).unwrap();
                         Ok(r)
                     }
-                    Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(0),
+                    Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                        // since rust 1.80 read_exact will move cursor position to end of internal
+                        // buffer so we have to reset it
+                        // ref https://github.com/rust-lang-ci/rust/commit/67b37f5054e4508694b7bd0b766e27f64cbd2d7f
+                        self.reads.seek(SeekFrom::Start(save)).unwrap();
+                        Ok(0)
+                    }
                     Err(e) => Err(e),
                 }
                 .unwrap();
