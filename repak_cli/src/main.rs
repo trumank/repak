@@ -67,7 +67,7 @@ struct ActionUnpack {
 
     /// Files or directories to include. Can be specified multiple times. If not specified, everything is extracted.
     #[arg(action = clap::ArgAction::Append, short, long)]
-    include: Vec<String>,
+    include: Vec<glob::Pattern>,
 }
 
 #[derive(Parser, Debug)]
@@ -339,12 +339,6 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
         let mount_point = PathBuf::from(pak.mount_point());
         let prefix = Path::new(&action.strip_prefix);
 
-        let includes = action
-            .include
-            .iter()
-            .map(|i| prefix.join(Path::new(i)))
-            .collect::<Vec<_>>();
-
         struct UnpackEntry {
             entry_path: String,
             out_path: PathBuf,
@@ -356,8 +350,28 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
             .into_iter()
             .map(|entry_path| {
                 let full_path = mount_point.join(&entry_path);
-                if !includes.is_empty() && !includes.iter().any(|i| full_path.starts_with(i)) {
-                    return Ok(None);
+                if !action.include.is_empty() {
+                    if let Ok(stripped) = full_path.strip_prefix(prefix) {
+                        let options = glob::MatchOptions {
+                            case_sensitive: true,
+                            require_literal_separator: true,
+                            require_literal_leading_dot: false,
+                        };
+                        if !action.include.iter().any(|i| {
+                            // check full file path
+                            i.matches_path_with(stripped, options)
+                                // check ancestor directories
+                                || stripped.ancestors().skip(1).any(|a| {
+                                    i.matches_path_with(a, options)
+                                        // hack to check ancestor directories with trailing slash
+                                        || i.matches_path_with(&a.join(""), options)
+                                })
+                        }) {
+                            return Ok(None);
+                        }
+                    } else {
+                        return Ok(None);
+                    }
                 }
                 let out_path = output
                     .join(full_path.strip_prefix(prefix).map_err(|_| {

@@ -149,6 +149,26 @@ fn test_cli_unpack() {
 }
 
 #[test]
+fn test_cli_unpack_include() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let assert = Command::cargo_bin("repak")
+        .unwrap()
+        .arg("unpack")
+        .arg(PAK)
+        .arg("-s")
+        .arg("../mount")
+        .arg("-i")
+        .arg("point/**/*.txt")
+        .arg("-o")
+        .arg(dir.path())
+        .assert();
+    assert.success().stdout(formatdoc! {r#"
+        Unpacked 2 files to {} from ../repak/tests/packs/pack_v11.pak
+    "#, &dir.path().to_string_lossy()});
+}
+
+#[test]
 fn test_cli_hashlist() {
     let assert = Command::cargo_bin("repak")
         .unwrap()
