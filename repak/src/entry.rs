@@ -36,6 +36,18 @@ fn align(offset: u64) -> u64 {
     (offset + 15) & !15
 }
 
+fn compression_index_size(version: Version) -> CompressionIndexSize {
+    match version {
+        Version::V8A => CompressionIndexSize::U8,
+        _ => CompressionIndexSize::U32,
+    }
+}
+
+enum CompressionIndexSize {
+    U8,
+    U32,
+}
+
 #[derive(Debug)]
 pub(crate) struct Entry {
     pub offset: u64,
@@ -65,9 +77,9 @@ impl Entry {
         size += 8; // offset
         size += 8; // compressed
         size += 8; // uncompressed
-        size += match version != Version::V8A {
-            true => 4,  // 32 bit compression
-            false => 1, // 8 bit compression
+        size += match compression_index_size(version) {
+            CompressionIndexSize::U8 => 1,  // 8 bit compression
+            CompressionIndexSize::U32 => 4, // 32 bit compression
         };
         size += match version.version_major() == VersionMajor::Initial {
             true => 8, // timestamp
@@ -223,10 +235,9 @@ impl Entry {
         let offset = reader.read_u64::<LE>()?;
         let compressed = reader.read_u64::<LE>()?;
         let uncompressed = reader.read_u64::<LE>()?;
-        let compression = match if version == Version::V8A {
-            reader.read_u8()? as u32
-        } else {
-            reader.read_u32::<LE>()?
+        let compression = match match compression_index_size(version) {
+            CompressionIndexSize::U8 => reader.read_u8()? as u32,
+            CompressionIndexSize::U32 => reader.read_u32::<LE>()?,
         } {
             0 => None,
             n => Some(n - 1),
@@ -267,9 +278,9 @@ impl Entry {
         writer.write_u64::<LE>(self.compressed)?;
         writer.write_u64::<LE>(self.uncompressed)?;
         let compression = self.compression_slot.map_or(0, |n| n + 1);
-        match version {
-            Version::V8A => writer.write_u8(compression.try_into().unwrap())?,
-            _ => writer.write_u32::<LE>(compression)?,
+        match compression_index_size(version) {
+            CompressionIndexSize::U8 => writer.write_u8(compression.try_into().unwrap())?,
+            CompressionIndexSize::U32 => writer.write_u32::<LE>(compression)?,
         }
 
         if version.version_major() == VersionMajor::Initial {
