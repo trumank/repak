@@ -36,11 +36,8 @@ fn align(offset: u64) -> u64 {
     (offset + 15) & !15
 }
 
-fn compression_index_size(version: Version) -> CompressionIndexSize {
-    match version {
-        Version::V8A => CompressionIndexSize::U8,
-        _ => CompressionIndexSize::U32,
-    }
+fn compression_index_size(_version: Version) -> CompressionIndexSize {
+    CompressionIndexSize::U8
 }
 
 enum CompressionIndexSize {
