@@ -564,7 +564,7 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
 name = "oodle_loader"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "hex",
@@ -687,7 +687,7 @@ checksum = "86b83b8b9847f9bf95ef68afb0b8e6cdb80f498442f5179a29fad448fcc1eaea"
 
 [[package]]
 name = "repak"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "base64",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "repak_cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aes",
  "assert_cmd",
