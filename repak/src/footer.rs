@@ -16,6 +16,7 @@ pub struct Footer {
     pub hash: [u8; 20],
     pub frozen: bool,
     pub compression: Vec<Option<Compression>>,
+    pub dbd_encryption_seed: [u8; 32],
 }
 
 impl Footer {
@@ -30,6 +31,8 @@ impl Footer {
         let index_offset = reader.read_u64::<LE>()?;
         let index_size = reader.read_u64::<LE>()?;
         let hash = reader.read_guid()?;
+        let mut dbd_encryption_seed: [u8; 32] = [0; 32];
+        reader.read_exact(&mut dbd_encryption_seed)?;
         let frozen = version.version_major() == VersionMajor::FrozenIndex && reader.read_bool()?;
         let compression = {
             let mut compression = Vec::with_capacity(match version {
@@ -77,6 +80,7 @@ impl Footer {
             hash,
             frozen,
             compression,
+            dbd_encryption_seed,
         })
     }
 
@@ -92,6 +96,10 @@ impl Footer {
         writer.write_u64::<LE>(self.index_offset)?;
         writer.write_u64::<LE>(self.index_size)?;
         writer.write_all(&self.hash)?;
+        if self.version_major >= VersionMajor::DeadByDaylight {
+            // XORing 0 will leave the value unchanged, which means that our index will be parsed by the game without any changes
+            writer.write_all(&[0; 32])?;
+        }
         if self.version_major == VersionMajor::FrozenIndex {
             writer.write_bool(self.frozen)?;
         }

@@ -2,6 +2,7 @@ use crate::entry::Entry;
 use crate::Compression;
 
 use super::ext::{ReadExt, WriteExt};
+use super::footer::Footer;
 use super::{Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
@@ -150,11 +151,21 @@ impl Index {
 }
 
 #[cfg(feature = "encryption")]
-fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
+fn decrypt(key: &super::Key, bytes: &mut [u8], footer: &Footer) -> Result<(), super::Error> {
     if let super::Key::Some(key) = key {
         use aes::cipher::BlockDecrypt;
         for chunk in bytes.chunks_mut(16) {
             key.decrypt_block(aes::Block::from_mut_slice(chunk))
+        }
+
+        // Do dbd XOR encryption with the seed read from the pak file
+        if footer.version_major >= VersionMajor::DeadByDaylight {
+            for chunk in bytes.chunks_mut(28) {
+                chunk
+                    .iter_mut()
+                    .zip(footer.dbd_encryption_seed)
+                    .for_each(|(a, b)| *a ^= b);
+            }
         }
         Ok(())
     } else {
@@ -313,7 +324,7 @@ impl Pak {
             #[cfg(not(feature = "encryption"))]
             return Err(super::Error::Encryption);
             #[cfg(feature = "encryption")]
-            decrypt(key, &mut index)?;
+            decrypt(key, &mut index, &footer)?;
         }
 
         let mut index = io::Cursor::new(index);
@@ -337,7 +348,7 @@ impl Pak {
                     #[cfg(not(feature = "encryption"))]
                     return Err(super::Error::Encryption);
                     #[cfg(feature = "encryption")]
-                    decrypt(key, &mut path_hash_index_buf)?;
+                    decrypt(key, &mut path_hash_index_buf, &footer)?;
                 }
 
                 let mut path_hash_index = vec![];
@@ -369,7 +380,7 @@ impl Pak {
                     #[cfg(not(feature = "encryption"))]
                     return Err(super::Error::Encryption);
                     #[cfg(feature = "encryption")]
-                    decrypt(key, &mut full_directory_index)?;
+                    decrypt(key, &mut full_directory_index, &footer)?;
                 }
                 let mut fdi = io::Cursor::new(full_directory_index);
 
@@ -576,6 +587,7 @@ impl Pak {
             hash: index_hash,
             frozen: false,
             compression: self.compression.clone(), // TODO: avoid this clone
+            dbd_encryption_seed: [0; 32],
         };
 
         footer.write(writer)?;

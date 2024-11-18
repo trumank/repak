@@ -45,6 +45,7 @@ pub enum Version {
     V9,
     V10,
     V11,
+    V12,
 }
 
 #[repr(u32)]
@@ -65,6 +66,7 @@ pub enum VersionMajor {
     FrozenIndex,           // v9 frozen index byte included
     PathHashIndex,         // v10
     Fnv64BugFix,           // v11
+    DeadByDaylight,        // v12, custom Dead By Daylight version, 32 bytes 0 padding between index hash and encrypted index
 }
 
 // strum shouldn't need to be installed by users
@@ -96,6 +98,10 @@ impl Version {
             // additional compression name
             size += 32;
         }
+        if self >= Version::V12 {
+            // additional 32 bytes padding between index hash and encrypted index
+            size += 32;
+        }
         size
     }
 
@@ -115,6 +121,7 @@ impl Version {
             Version::V9 => VersionMajor::FrozenIndex,
             Version::V10 => VersionMajor::PathHashIndex,
             Version::V11 => VersionMajor::Fnv64BugFix,
+            Version::V12 => VersionMajor::DeadByDaylight,
         }
     }
 }
