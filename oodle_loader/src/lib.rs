@@ -398,7 +398,8 @@ mod linux_oodle {
             }
         }
 
-        // Break things!
-        Ok(unsafe { std::mem::transmute(exports["OodleLZ_Decompress"]) })
+        Ok(unsafe {
+            std::mem::transmute::<*const c_void, OodleLZ_Decompress>(exports["OodleLZ_Decompress"])
+        })
     }
 }
