@@ -310,11 +310,12 @@ impl Entry {
         version: super::Version,
     ) -> Result<Self, super::Error> {
         let bits = reader.read_u32::<LE>()?;
+
         let bits = (bits >> 16) & 0x3F
             | (bits & 0xFFFF) << 6
-            | (bits & (1 << 23)) >> 1
-            | (bits & (1 << 22)) << 1
-            | bits & 0xFF000000;
+            | (bits & (1 << 28)) >> 6
+            | (bits & 0x0FC00000) << 1
+            | bits & 0xE0000000;
         reader.read_u8()?;
         let compression = match (bits >> 23) & 0x3f {
             0 => None,
@@ -411,10 +412,10 @@ impl Entry {
             | ((is_offset_32_bit_safe as u32) << 31);
 
         let flags = (flags & 0x3F) << 16
-            | ((flags >> 6) & 0xFFFF)
-            | (flags & (1 << 23)) >> 1
-            | (flags & (1 << 22)) << 1
-            | flags & 0xFF000000;
+            | (flags >> 6) & 0xFFFF
+            | (flags & (1 << 22)) << 6
+            | (flags & 0x1F800000) >> 1
+            | flags & 0xE0000000;
         writer.write_u32::<LE>(flags)?;
         writer.write_u8(0)?;
 
