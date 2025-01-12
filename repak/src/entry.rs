@@ -310,6 +310,12 @@ impl Entry {
         version: super::Version,
     ) -> Result<Self, super::Error> {
         let bits = reader.read_u32::<LE>()?;
+        let bits = (bits >> 16) & 0x3F
+            | (bits & 0xFFFF) << 6
+            | (bits & (1 << 23)) >> 1
+            | (bits & (1 << 22)) << 1
+            | bits & 0xFF000000;
+        reader.read_u8()?;
         let compression = match (bits >> 23) & 0x3f {
             0 => None,
             n => Some(n - 1),
@@ -333,8 +339,8 @@ impl Entry {
             })
         };
 
-        let offset = var_int(31)?;
         let uncompressed = var_int(30)?;
+        let offset = var_int(31)?;
         let compressed = match compression {
             None => uncompressed,
             _ => var_int(29)?,
@@ -404,22 +410,28 @@ impl Entry {
             | ((is_uncompressed_size_32_bit_safe as u32) << 30)
             | ((is_offset_32_bit_safe as u32) << 31);
 
+        let flags = (flags & 0x3F) << 16
+            | ((flags >> 6) & 0xFFFF)
+            | (flags & (1 << 23)) >> 1
+            | (flags & (1 << 22)) << 1
+            | flags & 0xFF000000;
         writer.write_u32::<LE>(flags)?;
+        writer.write_u8(0)?;
 
         if compression_block_size == 0x3f {
             writer.write_u32::<LE>(self.compression_block_size)?;
-        }
-
-        if is_offset_32_bit_safe {
-            writer.write_u32::<LE>(self.offset as u32)?;
-        } else {
-            writer.write_u64::<LE>(self.offset)?;
         }
 
         if is_uncompressed_size_32_bit_safe {
             writer.write_u32::<LE>(self.uncompressed as u32)?
         } else {
             writer.write_u64::<LE>(self.uncompressed)?
+        }
+
+        if is_offset_32_bit_safe {
+            writer.write_u32::<LE>(self.offset as u32)?;
+        } else {
+            writer.write_u64::<LE>(self.offset)?;
         }
 
         if self.compression_slot.is_some() {
