@@ -22,7 +22,7 @@ aes = { workspace = true, optional = true }
 flate2 = { version = "1.0", optional = true }
 zstd = { version = "0.13", optional = true }
 oodle_loader = { path = "../oodle_loader", optional = true}
-thiserror = "1.0"
+thiserror = "2.0"
 sha1 = { workspace = true }
 strum = { workspace = true }
 

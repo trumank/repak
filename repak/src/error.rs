@@ -39,7 +39,7 @@ pub enum Error {
     #[error("got {0}, which is not a boolean")]
     Bool(u8),
 
-    #[error("found magic of {0:#x} instead of {:#x}", super::MAGIC)]
+    #[error("found magic of {:#x} instead of {:#x}", .0, super::MAGIC)]
     Magic(u32),
 
     #[error("pointer to OodleLZ_Decompress was not provided")]

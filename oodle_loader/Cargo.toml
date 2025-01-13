@@ -10,14 +10,14 @@ edition.workspace = true
 libloading = "0.8"
 
 [target.'cfg(unix)'.dependencies]
-object = { version = "0.36.0", default-features = false, features = ["std", "read"] }
-libc = "0.2.155"
+object = { version = "0.36.7", default-features = false, features = ["std", "read"] }
+libc = "0.2.169"
 seq-macro = "0.3.5"
 
 [dependencies]
 sha1 = { workspace = true }
-ureq = "2.9"
+ureq = "2.12"
 hex-literal = "0.4"
 hex = { workspace = true }
-anyhow = "1.0.86"
+anyhow = "1.0.95"
 lzma-rs = "0.3.0"
