@@ -673,14 +673,6 @@ fn generate_full_directory_index<W: Write>(
     Ok(())
 }
 
-fn pad_zeros_to_alignment(v: &mut Vec<u8>, alignment: usize) {
-    assert!(alignment >= 1);
-    if v.len() % alignment != 0 {
-        v.extend(std::iter::repeat(0).take(((v.len() + alignment - 1) / alignment) * alignment))
-    }
-    assert!(v.len() % alignment == 0);
-}
-
 #[cfg(feature = "encryption")]
 fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
     use aes::cipher::BlockEncrypt;
