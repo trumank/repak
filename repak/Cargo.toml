@@ -15,6 +15,7 @@ oodle_loader = ["dep:oodle_loader"]
 oodle_explicit = ["oodle"]
 oodle_implicit_dynamic = ["dep:oodle_loader", "oodle"]
 encryption = ["dep:aes"]
+wuthering-waves = []
 
 [dependencies]
 byteorder = "1.5"

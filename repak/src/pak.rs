@@ -479,7 +479,7 @@ impl Pak {
                 let mut encoded_entries = io::Cursor::new(vec![]);
                 for entry in self.index.entries.values() {
                     offsets.push(encoded_entries.get_ref().len() as u32);
-                    entry.write_encoded(&mut encoded_entries)?;
+                    entry.write_encoded(&mut encoded_entries, self.version)?;
                 }
                 (encoded_entries.into_inner(), offsets)
             };
