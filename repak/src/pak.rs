@@ -220,17 +220,29 @@ impl PakReader {
         writer: &mut W,
     ) -> Result<(), super::Error> {
         match self.pak.index.entries().get(path) {
-            Some(entry) => entry.read_file(
-                reader,
-                self.pak.version,
-                &self.pak.compression,
-                &self.key,
-                writer,
-                &format!(
-                    "{}/{path}",
-                    self.mount_point().strip_prefix("../../..").unwrap()
-                ),
-            ),
+            Some(entry) => {
+                let path = format!("{}/{}", self.mount_point(), path);
+
+                let mut last = false;
+                let path = path
+                    .chars()
+                    .filter(|&c| {
+                        let keep = c != '/' || !last;
+                        last = c == '/';
+                        keep
+                    })
+                    .collect::<String>();
+                let path = path.strip_prefix("../../../").unwrap();
+
+                entry.read_file(
+                    reader,
+                    self.pak.version,
+                    &self.pak.compression,
+                    &self.key,
+                    writer,
+                    path,
+                )
+            }
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }
     }
