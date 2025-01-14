@@ -43,6 +43,21 @@ fn compression_index_size(version: Version) -> CompressionIndexSize {
     }
 }
 
+fn get_limit(path: &str) -> usize {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x11, 0x22, 0x33, 0x44]);
+    hasher.update(path.to_ascii_lowercase().as_bytes());
+    let limit =
+        ((u64::from_le_bytes(hasher.finalize().as_bytes()[0..8].try_into().unwrap()) % 0x3d) * 63
+            + 319)
+            & 0xffffffffffffffc0;
+    if limit == 0 {
+        0x1000
+    } else {
+        limit as usize
+    }
+}
+
 enum CompressionIndexSize {
     U8,
     U32,
@@ -335,16 +350,21 @@ impl Entry {
         compression: &[Option<Compression>],
         #[allow(unused)] key: &super::Key,
         buf: &mut W,
+        path: &str,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
         #[cfg(any(feature = "compression", feature = "oodle"))]
         let data_offset = reader.stream_position()?;
+
         #[allow(unused_mut)]
         let mut data = reader.read_len(match self.is_encrypted() {
             true => align(self.compressed),
             false => self.compressed,
         } as usize)?;
+
+        let limit = get_limit(path).min(data.len());
+
         if self.is_encrypted() {
             #[cfg(not(feature = "encryption"))]
             return Err(super::Error::Encryption);
@@ -354,8 +374,10 @@ impl Entry {
                     return Err(super::Error::Encrypted);
                 };
                 use aes::cipher::BlockDecrypt;
-                for block in data.chunks_mut(16) {
-                    key.decrypt_block(aes::Block::from_mut_slice(block))
+                for block in data[..limit].chunks_mut(16) {
+                    block.chunks_mut(4).for_each(|c| c.reverse());
+                    key.decrypt_block(aes::Block::from_mut_slice(block));
+                    block.chunks_mut(4).for_each(|c| c.reverse());
                 }
                 data.truncate(self.compressed as usize);
             }

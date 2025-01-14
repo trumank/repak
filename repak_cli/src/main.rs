@@ -161,7 +161,10 @@ impl std::str::FromStr for AesKey {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use aes::cipher::KeyInit;
         use base64::{engine::general_purpose, Engine as _};
-        let try_parse = |bytes: Vec<_>| aes::Aes256::new_from_slice(&bytes).ok().map(AesKey);
+        let try_parse = |mut bytes: Vec<_>| {
+            bytes.chunks_mut(4).for_each(|c| c.reverse());
+            aes::Aes256::new_from_slice(&bytes).ok().map(AesKey)
+        };
         hex::decode(s.strip_prefix("0x").unwrap_or(s))
             .ok()
             .and_then(try_parse)

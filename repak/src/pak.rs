@@ -152,7 +152,9 @@ fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
     if let super::Key::Some(key) = key {
         use aes::cipher::BlockDecrypt;
         for chunk in bytes.chunks_mut(16) {
-            key.decrypt_block(aes::Block::from_mut_slice(chunk))
+            chunk.chunks_mut(4).for_each(|c| c.reverse());
+            key.decrypt_block(aes::Block::from_mut_slice(chunk));
+            chunk.chunks_mut(4).for_each(|c| c.reverse());
         }
         Ok(())
     } else {
@@ -224,6 +226,10 @@ impl PakReader {
                 &self.pak.compression,
                 &self.key,
                 writer,
+                &format!(
+                    "{}/{path}",
+                    self.mount_point().strip_prefix("../../..").unwrap()
+                ),
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }
@@ -736,7 +742,9 @@ fn generate_full_directory_index<W: Write>(
 fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
     use aes::cipher::BlockEncrypt;
     for chunk in bytes.chunks_mut(16) {
-        key.encrypt_block(aes::Block::from_mut_slice(chunk))
+        chunk.chunks_mut(4).for_each(|c| c.reverse());
+        key.encrypt_block(aes::Block::from_mut_slice(chunk));
+        chunk.chunks_mut(4).for_each(|c| c.reverse());
     }
 }
 
