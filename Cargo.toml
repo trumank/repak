@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["repak", "repak_cli"]
+members = ["repak_rivals"]
 
 [workspace.package]
 repository = "https://github.com/trumank/repak"

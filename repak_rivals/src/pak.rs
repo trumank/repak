@@ -1,4 +1,4 @@
-use crate::entry::Entry;
+use crate::entry::{process_chunks, Entry};
 use crate::Compression;
 
 use super::ext::{ReadExt, WriteExt};
@@ -153,9 +153,7 @@ impl Index {
 fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
     if let super::Key::Some(key) = key {
         use aes::cipher::BlockDecrypt;
-        for chunk in bytes.chunks_mut(16) {
-            key.decrypt_block(aes::Block::from_mut_slice(chunk))
-        }
+        process_chunks(key,bytes);
         Ok(())
     } else {
         Err(super::Error::Encrypted)
@@ -229,6 +227,8 @@ impl PakReader {
                 &self.key,
                 &self.oodle,
                 writer,
+                path,
+                self.mount_point()
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }

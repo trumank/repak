@@ -3,6 +3,8 @@ use crate::Error;
 use super::{ext::BoolExt, ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
+use std::path::Path;
+use aes::cipher::BlockDecrypt;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum EntryLocation {
@@ -450,6 +452,8 @@ impl Entry {
         #[allow(unused)] key: &super::Key,
         #[allow(unused)] oodle: &super::Oodle,
         buf: &mut W,
+        path: &str,
+        mount_point: &str,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
@@ -469,9 +473,31 @@ impl Entry {
                     return Err(super::Error::Encrypted);
                 };
                 use aes::cipher::BlockDecrypt;
-                for block in data.chunks_mut(16) {
-                    key.decrypt_block(aes::Block::from_mut_slice(block))
+
+                let mut hasher = blake3::Hasher::new();
+                hasher.update(&[0x11, 0x22, 0x33, 0x44]);
+
+                let path = Path::new(mount_point)
+                    .join(path);
+
+                let path = path.to_str().expect("Failed to convert path")
+                    .strip_prefix("../../../").expect("Failed to strip prefix");;
+                hasher.update(path.to_ascii_lowercase().as_bytes());
+
+                let hash = hasher.finalize();
+                let hash = &hash.as_bytes()[0..8];
+                let first = u64::from_le_bytes(hash.try_into().expect("Failed to convert hash"));
+
+                let encryption_lim = (63 * (first%61) + 319) & 0xffffffffffffffc0;
+                let encryption_lim = if encryption_lim == 0 {0x1000} else {encryption_lim as usize};
+
+
+                for block in data[..encryption_lim].chunks_mut(16) {
+                    block.chunks_mut(4).for_each(|c| c.reverse());
+                    key.decrypt_block(aes::Block::from_mut_slice(block));
+                    block.chunks_mut(4).for_each(|c| c.reverse());
                 }
+                // process_chunks(key, &mut to_decrypt);
                 data.truncate(self.compressed as usize);
             }
         }
@@ -578,5 +604,13 @@ mod test {
             .write(&mut out, super::Version::V5, super::EntryLocation::Data)
             .unwrap();
         assert_eq!(&data, &out);
+    }
+}
+
+pub fn process_chunks(key: &aes::Aes256, blocks: &mut [u8]) {
+    for block in blocks.chunks_mut(16) {
+        block.chunks_mut(4).for_each(|c| c.reverse());
+        key.decrypt_block(aes::Block::from_mut_slice(block));
+        block.chunks_mut(4).for_each(|c| c.reverse());
     }
 }
