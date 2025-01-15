@@ -461,7 +461,7 @@ impl Pak {
         file.write_all(&combined_buffer)?;
 
 
-        //footer.write(&mut file)?;
+        footer.write(&mut file)?;
         Ok(())
     }
 
