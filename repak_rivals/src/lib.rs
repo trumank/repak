@@ -136,6 +136,17 @@ pub(crate) enum Key {
     Some(aes::Aes256),
     #[default]
     None,
+
+
+}
+
+impl Key{
+    fn get(&self) -> Option<aes::Aes256> {
+        match self {
+            Self::Some(key) => Some(key.clone()),
+            Self::None => None,
+        }
+    }
 }
 
 #[cfg(feature = "encryption")]

@@ -1,11 +1,14 @@
-use crate::entry::{process_chunks, Entry};
-use crate::Compression;
+use crate::entry::{get_limit, process_chunks, Entry};
+use crate::{Compression, Key};
 
 use super::ext::{ReadExt, WriteExt};
 use super::{Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
-use std::io::{self, Read, Seek, Write};
+use std::fmt::format;
+use std::fs::File;
+use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use aes::cipher::BlockDecrypt;
 
 #[derive(Debug)]
 pub struct PakBuilder {
@@ -49,6 +52,12 @@ impl PakBuilder {
     pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
         PakReader::new_any_inner(reader, self.key, self.oodle)
     }
+
+    pub fn encrypter<R: Read+ Seek>(self, reader: &mut R) -> Result<(), super::Error>{
+        PakReader::encrypt_inner(reader, self.key, self.oodle).expect("Error encrypting");
+        Ok(())
+    }
+
     pub fn reader_with_version<R: Read + Seek>(
         self,
         reader: &mut R,
@@ -161,6 +170,21 @@ fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
 }
 
 impl PakReader {
+
+    fn encrypt_inner<R: Read + Seek>(
+        reader: &mut R,
+        key: super::Key,
+        oodle: super::Oodle,
+    ) -> Result<(), super::Error> {
+        use std::fmt::Write;
+        let mut log = "\n".to_owned();
+
+        let x= Pak::encrypt(&mut *reader, Version::V11, &key).expect("Unable to encrypt");
+        // Err(super::Error::UnsupportedOrEncrypted(log))
+        Ok(())
+    }
+
+
     fn new_any_inner<R: Read + Seek>(
         reader: &mut R,
         key: super::Key,
@@ -295,14 +319,162 @@ impl<W: Write + Seek> PakWriter<W> {
 }
 
 impl Pak {
+    fn encrypt<R: Read+Seek>(reader: &mut R,version: Version,key: &super::Key) -> Result<(), super::Error>{
+
+
+        // read footer to get index, encryption & compression info
+        println!("Seeking to end of file");
+        reader.seek(io::SeekFrom::End(-version.size()))?;
+        let mut footer = super::footer::Footer::read(reader, version)?;
+        reader.seek(io::SeekFrom::Start(footer.index_offset))?;
+
+        let mut index = reader.read_len(footer.index_size as usize)?;
+        let key = key.get().unwrap();
+
+        // encrypting the index!!
+        println!("Encrypting index");
+        let mut encrypted_index = index.clone();
+
+        if encrypted_index.len() % 16 != 0{
+            pad_pkcs7(&mut encrypted_index,16);
+        }
+        encrypt(&key, &mut encrypted_index);
+
+        let mut index = io::Cursor::new(index);
+        let mount_point = index.read_string()?;
+        let len = index.read_u32::<LE>()? as usize;
+
+
+        let path_hash_seed = index.read_u64::<LE>()?;
+
+        let mut encrypted_path_hash_index_buf = if dbg!(index.read_u32::<LE>()?) != 0 {
+            let path_hash_index_offset = index.read_u64::<LE>()?;
+            let path_hash_index_size = index.read_u64::<LE>()?;
+            let _path_hash_index_hash = index.read_len(20)?;
+
+            reader.seek(io::SeekFrom::Start(path_hash_index_offset))?;
+            let mut path_hash_index_buf = reader.read_len(path_hash_index_size as usize)?;
+            // TODO verify hash
+
+            let mut encrypted_path_hash_index_buf_duh = path_hash_index_buf.clone();
+            if encrypted_path_hash_index_buf_duh.len() % 16 != 0{
+                pad_pkcs7(&mut encrypted_path_hash_index_buf_duh,16);
+            }
+            encrypt(&key, &mut encrypted_path_hash_index_buf_duh);
+
+            let mut path_hash_index = vec![];
+            let mut phi_reader = io::Cursor::new(&mut path_hash_index_buf);
+            for _ in 0..phi_reader.read_u32::<LE>()? {
+                let hash = phi_reader.read_u64::<LE>()?;
+                let encoded_entry_offset = phi_reader.read_u32::<LE>()?;
+                path_hash_index.push((hash, encoded_entry_offset));
+            }
+
+            Some(encrypted_path_hash_index_buf_duh)
+        } else {
+            None
+        };
+
+        let mut encrypted_full_directory_index_buf = vec![];
+        let full_directory_index = if index.read_u32::<LE>()? != 0 {
+            println!("Reading full dir index");
+            let full_directory_index_offset = index.read_u64::<LE>()?;
+            let full_directory_index_size = index.read_u64::<LE>()?;
+            let _full_directory_index_hash = index.read_len(20)?;
+
+            reader.seek(io::SeekFrom::Start(full_directory_index_offset))?;
+            #[allow(unused_mut)]
+            let mut full_directory_index =
+                reader.read_len(full_directory_index_size as usize)?;
+            // TODO verify hash
+
+            encrypted_full_directory_index_buf = full_directory_index.clone();
+            if encrypted_full_directory_index_buf.len() % 16 != 0{
+                pad_pkcs7(&mut encrypted_full_directory_index_buf,16);
+            }
+            encrypt(&key, &mut encrypted_full_directory_index_buf);
+
+            let mut fdi = io::Cursor::new(full_directory_index);
+
+            let dir_count = fdi.read_u32::<LE>()? as usize;
+            let mut directories = BTreeMap::new();
+            for _ in 0..dir_count {
+                let dir_name = fdi.read_string()?;
+                let file_count = fdi.read_u32::<LE>()? as usize;
+                let mut files = BTreeMap::new();
+                for _ in 0..file_count {
+                    let file_name = fdi.read_string()?;
+                    files.insert(file_name, fdi.read_u32::<LE>()?);
+                }
+                directories.insert(dir_name, files);
+            }
+            Some(directories)
+        } else {
+            None
+        };
+
+        let size = index.read_u32::<LE>()? as usize;
+        let encoded_entries = index.read_len(size)?;
+
+        let mut encrypted_entries = encoded_entries.clone();
+
+        let mut entries_by_path = BTreeMap::new();
+        if let Some(fdi) = &full_directory_index {
+            let mut encoded_entries = io::Cursor::new(&encoded_entries);
+            for (dir_name, dir) in fdi {
+                for (file_name, encoded_offset) in dir {
+                    if *encoded_offset == 0x80000000 {
+                        println!("{file_name:?} has invalid offset: 0x{encoded_offset:08x}");
+                        continue;
+                    }
+                    encoded_entries.seek(io::SeekFrom::Start(*encoded_offset as u64))?;
+                    let entry =
+                        super::entry::Entry::read_encoded(&mut encoded_entries, version)?;
+                    let path = format!(
+                        "{}{}",
+                        dir_name.strip_prefix('/').unwrap_or(dir_name),
+                        file_name
+                    );
+
+                    let path_normalized = format!("{}/{path}",mount_point.strip_prefix("../../../").unwrap());
+                    let limit = get_limit(&path_normalized);
+                    encrypt(&key, &mut encrypted_entries[..limit]);
+                    entries_by_path.insert(path, entry);
+                }
+            }
+        }
+        assert_eq!(index.read_u32::<LE>()?, 0, "remaining index bytes are 0"); // TODO possibly remaining unencoded entries?
+
+        let mut file = File::create("encrypted_output.pak")?;
+
+        let mut file = BufWriter::new(file);
+        footer.index_offset = 0;
+        footer.encrypted = true;
+
+        let mut combined_buffer = Vec::new();
+        combined_buffer.extend_from_slice(&encrypted_index);
+        combined_buffer.extend_from_slice(&encrypted_path_hash_index_buf.unwrap());
+        combined_buffer.extend_from_slice(&encrypted_full_directory_index_buf);
+        combined_buffer.extend_from_slice(&encrypted_entries);
+
+        println!("size of combined buffer = {}",combined_buffer.len());
+        file.write_all(&combined_buffer)?;
+
+
+        //footer.write(&mut file)?;
+        Ok(())
+    }
+
     fn read<R: Read + Seek>(
         reader: &mut R,
         version: super::Version,
         #[allow(unused)] key: &super::Key,
     ) -> Result<Self, super::Error> {
-        // read footer to get index, encryption & compression info
+        reader.seek(SeekFrom::Start(0))?;
+        let mut magic_bytes = [0u8; 9];
+        reader.read_exact(&mut magic_bytes)?;
         reader.seek(io::SeekFrom::End(-version.size()))?;
-        let footer = super::footer::Footer::read(reader, version)?;
+        let mut footer = super::footer::Footer::read(reader, version)?;
         // read index to get all the entry info
         reader.seek(io::SeekFrom::Start(footer.index_offset))?;
         #[allow(unused_mut)]
@@ -310,8 +482,12 @@ impl Pak {
 
         // decrypt index if needed
         if footer.encrypted {
+            println!("TRYING TO DECRYPT");
             #[cfg(not(feature = "encryption"))]
             return Err(super::Error::Encryption);
+            if index.len() % 16 != 0{
+                unpad_pkcs7(&mut index).expect("Couldnt unpak");
+            }
             #[cfg(feature = "encryption")]
             decrypt(key, &mut index)?;
         }
@@ -320,125 +496,125 @@ impl Pak {
         let mount_point = index.read_string()?;
         let len = index.read_u32::<LE>()? as usize;
 
-        let index = if version.version_major() >= VersionMajor::PathHashIndex {
-            let path_hash_seed = index.read_u64::<LE>()?;
+        println!("Reading path hash index");
+        let path_hash_seed = index.read_u64::<LE>()?;
 
-            // Left in for potential desire to verify path index hashes.
-            let _path_hash_index = if index.read_u32::<LE>()? != 0 {
-                let path_hash_index_offset = index.read_u64::<LE>()?;
-                let path_hash_index_size = index.read_u64::<LE>()?;
-                let _path_hash_index_hash = index.read_len(20)?;
+        // Left in for potential desire to verify path index hashes.
+        let _path_hash_index = if index.read_u32::<LE>()? != 0 {
+            let path_hash_index_offset = index.read_u64::<LE>()?;
+            let path_hash_index_size = index.read_u64::<LE>()?;
+            let _path_hash_index_hash = index.read_len(20)?;
 
-                reader.seek(io::SeekFrom::Start(path_hash_index_offset))?;
-                let mut path_hash_index_buf = reader.read_len(path_hash_index_size as usize)?;
-                // TODO verify hash
+            reader.seek(io::SeekFrom::Start(path_hash_index_offset))?;
+            let mut path_hash_index_buf = reader.read_len(path_hash_index_size as usize)?;
+            // TODO verify hash
 
-                if footer.encrypted {
-                    #[cfg(not(feature = "encryption"))]
-                    return Err(super::Error::Encryption);
-                    #[cfg(feature = "encryption")]
-                    decrypt(key, &mut path_hash_index_buf)?;
+            if footer.encrypted {
+                println!("Decrypting footer");
+
+                #[cfg(not(feature = "encryption"))]
+                return Err(super::Error::Encryption);
+                if path_hash_index_buf.len() % 16 != 0 {
+                    unpad_pkcs7(&mut path_hash_index_buf).expect("Couldnt unpak");
+
                 }
 
-                let mut path_hash_index = vec![];
-                let mut phi_reader = io::Cursor::new(&mut path_hash_index_buf);
-                for _ in 0..phi_reader.read_u32::<LE>()? {
-                    let hash = phi_reader.read_u64::<LE>()?;
-                    let encoded_entry_offset = phi_reader.read_u32::<LE>()?;
-                    path_hash_index.push((hash, encoded_entry_offset));
-                }
-
-                Some(path_hash_index)
-            } else {
-                None
-            };
-
-            // Left in for potential desire to verify full directory index hashes.
-            let full_directory_index = if index.read_u32::<LE>()? != 0 {
-                let full_directory_index_offset = index.read_u64::<LE>()?;
-                let full_directory_index_size = index.read_u64::<LE>()?;
-                let _full_directory_index_hash = index.read_len(20)?;
-
-                reader.seek(io::SeekFrom::Start(full_directory_index_offset))?;
-                #[allow(unused_mut)]
-                let mut full_directory_index =
-                    reader.read_len(full_directory_index_size as usize)?;
-                // TODO verify hash
-
-                if footer.encrypted {
-                    #[cfg(not(feature = "encryption"))]
-                    return Err(super::Error::Encryption);
-                    #[cfg(feature = "encryption")]
-                    decrypt(key, &mut full_directory_index)?;
-                }
-                let mut fdi = io::Cursor::new(full_directory_index);
-
-                let dir_count = fdi.read_u32::<LE>()? as usize;
-                let mut directories = BTreeMap::new();
-                for _ in 0..dir_count {
-                    let dir_name = fdi.read_string()?;
-                    let file_count = fdi.read_u32::<LE>()? as usize;
-                    let mut files = BTreeMap::new();
-                    for _ in 0..file_count {
-                        let file_name = fdi.read_string()?;
-                        files.insert(file_name, fdi.read_u32::<LE>()?);
-                    }
-                    directories.insert(dir_name, files);
-                }
-                Some(directories)
-            } else {
-                None
-            };
-            let size = index.read_u32::<LE>()? as usize;
-            let encoded_entries = index.read_len(size)?;
-
-            let mut entries_by_path = BTreeMap::new();
-            if let Some(fdi) = &full_directory_index {
-                let mut encoded_entries = io::Cursor::new(&encoded_entries);
-                for (dir_name, dir) in fdi {
-                    for (file_name, encoded_offset) in dir {
-                        if *encoded_offset == 0x80000000 {
-                            println!("{file_name:?} has invalid offset: 0x{encoded_offset:08x}");
-                            continue;
-                        }
-                        encoded_entries.seek(io::SeekFrom::Start(*encoded_offset as u64))?;
-                        let entry =
-                            super::entry::Entry::read_encoded(&mut encoded_entries, version)?;
-                        let path = format!(
-                            "{}{}",
-                            dir_name.strip_prefix('/').unwrap_or(dir_name),
-                            file_name
-                        );
-                        entries_by_path.insert(path, entry);
-                    }
-                }
+                #[cfg(feature = "encryption")]
+                decrypt(key, &mut path_hash_index_buf)?;
             }
 
-            assert_eq!(index.read_u32::<LE>()?, 0, "remaining index bytes are 0"); // TODO possibly remaining unencoded entries?
-
-            Index {
-                path_hash_seed: Some(path_hash_seed),
-                entries: entries_by_path,
+            let mut path_hash_index = vec![];
+            let mut phi_reader = io::Cursor::new(&mut path_hash_index_buf);
+            for _ in 0..phi_reader.read_u32::<LE>()? {
+                let hash = phi_reader.read_u64::<LE>()?;
+                let encoded_entry_offset = phi_reader.read_u32::<LE>()?;
+                path_hash_index.push((hash, encoded_entry_offset));
             }
+
+            Some(path_hash_index)
         } else {
-            let mut entries = BTreeMap::new();
-            for _ in 0..len {
-                entries.insert(
-                    index.read_string()?,
-                    super::entry::Entry::read(&mut index, version)?,
-                );
+            None
+        };
+
+        // Left in for potential desire to verify full directory index hashes.
+        let full_directory_index = if index.read_u32::<LE>()? != 0 {
+            println!("Reading full dir index");
+            let full_directory_index_offset = index.read_u64::<LE>()?;
+            let full_directory_index_size = index.read_u64::<LE>()?;
+            let _full_directory_index_hash = index.read_len(20)?;
+
+            reader.seek(io::SeekFrom::Start(full_directory_index_offset))?;
+            #[allow(unused_mut)]
+            let mut full_directory_index =
+                reader.read_len(full_directory_index_size as usize)?;
+            // TODO verify hash
+
+            if footer.encrypted {
+                println!("Decrypting full_dir_index");
+
+                #[cfg(not(feature = "encryption"))]
+                return Err(super::Error::Encryption);
+                unpad_pkcs7(&mut full_directory_index).expect("Couldnt unpak");
+
+                #[cfg(feature = "encryption")]
+                decrypt(key, &mut full_directory_index)?;
             }
-            Index {
-                path_hash_seed: None,
-                entries,
+            let mut fdi = io::Cursor::new(full_directory_index);
+
+            let dir_count = fdi.read_u32::<LE>()? as usize;
+            let mut directories = BTreeMap::new();
+            for _ in 0..dir_count {
+                let dir_name = fdi.read_string()?;
+                let file_count = fdi.read_u32::<LE>()? as usize;
+                let mut files = BTreeMap::new();
+                for _ in 0..file_count {
+                    let file_name = fdi.read_string()?;
+                    files.insert(file_name, fdi.read_u32::<LE>()?);
+                }
+                directories.insert(dir_name, files);
             }
+            Some(directories)
+        } else {
+            None
+        };
+        let size = index.read_u32::<LE>()? as usize;
+        let encoded_entries = index.read_len(size)?;
+
+        let mut entries_by_path = BTreeMap::new();
+        if let Some(fdi) = &full_directory_index {
+            let mut encoded_entries = io::Cursor::new(&encoded_entries);
+            for (dir_name, dir) in fdi {
+                for (file_name, encoded_offset) in dir {
+                    if *encoded_offset == 0x80000000 {
+                        println!("{file_name:?} has invalid offset: 0x{encoded_offset:08x}");
+                        continue;
+                    }
+                    encoded_entries.seek(io::SeekFrom::Start(*encoded_offset as u64))?;
+                    let entry =
+                        super::entry::Entry::read_encoded(&mut encoded_entries, version)?;
+                    let path = format!(
+                        "{}{}",
+                        dir_name.strip_prefix('/').unwrap_or(dir_name),
+                        file_name
+                    );
+                    println!("Adding {}/{}",mount_point,path);
+                    entries_by_path.insert(path, entry);
+                }
+            }
+        }
+
+        assert_eq!(index.read_u32::<LE>()?, 0, "remaining index bytes are 0"); // TODO possibly remaining unencoded entries?
+
+        let i = Index {
+            path_hash_seed: Some(path_hash_seed),
+            entries: entries_by_path,
         };
 
         Ok(Pak {
             version,
             mount_point,
             index_offset: Some(footer.index_offset),
-            index,
+            index: i,
             encrypted_index: footer.encrypted,
             encryption_guid: footer.encryption_uuid,
             compression: footer.compression,
@@ -672,14 +848,50 @@ fn generate_full_directory_index<W: Write>(
 
     Ok(())
 }
+fn pad_pkcs7(data: &mut Vec<u8>, block_size: usize) {
+    let padding = block_size - (data.len() % block_size);
+    println!("Padding data of length {} with {:?}",data.len(),padding);
+    data.extend(vec![padding as u8; padding]);
+}
 
-#[cfg(feature = "encryption")]
-fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
-    use aes::cipher::BlockEncrypt;
-    for chunk in bytes.chunks_mut(16) {
-        key.encrypt_block(aes::Block::from_mut_slice(chunk))
+fn unpad_pkcs7(data: &mut Vec<u8>) -> Result<usize, &'static str> {
+    if let Some(&last_byte) = data.last() {
+        let padding = last_byte as usize;
+        if padding > data.len() || padding == 0 {
+            return Err("Invalid padding");
+        }
+        for &byte in &data[data.len() - padding..] {
+            if byte as usize != padding {
+                return Err("Invalid padding");
+            }
+        }
+        data.truncate(data.len() - padding);
+        Ok(padding)
+    } else {
+        Err("Data is empty")
     }
 }
+
+#[cfg(feature = "encryption")]
+fn encrypt(key: &aes::Aes256, bytes: &mut [u8]) {
+    use aes::cipher::BlockEncrypt;
+    for chunk in bytes.chunks_mut(16) {
+        if chunk.len() < 16 {
+            println!("padding struct");
+            let mut padded_chunk = [0u8; 16];
+            padded_chunk[..chunk.len()].copy_from_slice(chunk);
+            padded_chunk.chunks_mut(4).for_each(|c| c.reverse());
+            key.encrypt_block(aes::Block::from_mut_slice(&mut padded_chunk));
+            padded_chunk.chunks_mut(4).for_each(|c| c.reverse());
+            chunk.copy_from_slice(&padded_chunk[..chunk.len()]);
+        } else {
+            chunk.chunks_mut(4).for_each(|c| c.reverse());
+            key.encrypt_block(aes::Block::from_mut_slice(chunk));
+            chunk.chunks_mut(4).for_each(|c| c.reverse());
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod test {

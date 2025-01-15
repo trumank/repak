@@ -472,24 +472,7 @@ impl Entry {
                 let super::Key::Some(key) = key else {
                     return Err(super::Error::Encrypted);
                 };
-                use aes::cipher::BlockDecrypt;
-
-                let mut hasher = blake3::Hasher::new();
-                hasher.update(&[0x11, 0x22, 0x33, 0x44]);
-
-                let path = Path::new(mount_point)
-                    .join(path);
-
-                let path = path.to_str().expect("Failed to convert path")
-                    .strip_prefix("../../../").expect("Failed to strip prefix");;
-                hasher.update(path.to_ascii_lowercase().as_bytes());
-
-                let hash = hasher.finalize();
-                let hash = &hash.as_bytes()[0..8];
-                let first = u64::from_le_bytes(hash.try_into().expect("Failed to convert hash"));
-
-                let encryption_lim = (63 * (first%61) + 319) & 0xffffffffffffffc0;
-                let encryption_lim = if encryption_lim == 0 {0x1000} else {encryption_lim as usize};
+                let encryption_lim = get_limit(path);
 
 
                 for block in data[..encryption_lim].chunks_mut(16) {
@@ -588,6 +571,20 @@ impl Entry {
     }
 }
 
+pub fn get_limit(path: &str) -> usize {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x11, 0x22, 0x33, 0x44]);
+    hasher.update(path.to_ascii_lowercase().as_bytes());
+    let limit =
+        ((u64::from_le_bytes(hasher.finalize().as_bytes()[0..8].try_into().unwrap()) % 0x3d) * 63
+            + 319)
+            & 0xffffffffffffffc0;
+    if limit == 0 {
+        0x1000 as usize
+    } else {
+        limit as usize
+    }
+}
 mod test {
     #[test]
     fn test_entry() {
