@@ -43,6 +43,21 @@ fn compression_index_size(version: Version) -> CompressionIndexSize {
     }
 }
 
+fn get_limit(path: &str) -> usize {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x11, 0x22, 0x33, 0x44]);
+    hasher.update(path.to_ascii_lowercase().as_bytes());
+    let limit =
+        ((u64::from_le_bytes(hasher.finalize().as_bytes()[0..8].try_into().unwrap()) % 0x3d) * 63
+            + 319)
+            & 0xffffffffffffffc0;
+    if limit == 0 {
+        0x1000
+    } else {
+        limit as usize
+    }
+}
+
 enum CompressionIndexSize {
     U8,
     U32,
@@ -103,15 +118,29 @@ impl Entry {
         version: Version,
         compression_slots: &mut Vec<Option<Compression>>,
         allowed_compression: &[Compression],
+        key: &super::Key,
+        variant: super::PakVariant,
+        path: &str,
         data: impl AsRef<[u8]>,
     ) -> Result<Self, super::Error> {
+        let mut data = data.as_ref().to_vec();
+        let is_encrypted = matches!(key, super::Key::Some(_));
+        
+        #[cfg(feature = "encryption")]
+        if is_encrypted {
+            super::encryption::encrypt(key, &mut data, variant, path)?;
+        }
+
+        let encrypted = matches!(key, super::Key::Some(_));
+
+        
         // TODO hash needs to be post-compression
         use sha1::{Digest, Sha1};
         let mut hasher = Sha1::new();
         hasher.update(&data);
 
         let offset = writer.stream_position()?;
-        let len = data.as_ref().len() as u64;
+        let len = data.len() as u64;
 
         // TODO possibly select best compression based on some criteria instead of picking first
         let compression = allowed_compression.first().cloned();
@@ -178,7 +207,7 @@ impl Entry {
                         compress.write_all(data.as_ref())?;
                         compress.finish()?
                     }
-                    Compression::Zstd => zstd::stream::encode_all(data.as_ref(), 0)?,
+                    Compression::Zstd => zstd::stream::encode_all::<&[u8]>(data.as_ref(), 0)?,
                     Compression::Oodle => {
                         return Err(Error::Other("writing Oodle compression unsupported".into()))
                     }
@@ -212,7 +241,7 @@ impl Entry {
             timestamp: None,
             hash: Some(hasher.finalize().into()),
             blocks,
-            flags: 0,
+            flags: encrypted as u8,
             compression_block_size: compressed.as_ref().map(|_| len as u32).unwrap_or_default(),
         };
 
@@ -450,16 +479,21 @@ impl Entry {
         #[allow(unused)] key: &super::Key,
         #[allow(unused)] oodle: &super::Oodle,
         buf: &mut W,
+        path: &str,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
         Entry::read(reader, version)?;
         #[cfg(any(feature = "compression", feature = "oodle"))]
         let data_offset = reader.stream_position()?;
+
         #[allow(unused_mut)]
         let mut data = reader.read_len(match self.is_encrypted() {
             true => align(self.compressed),
             false => self.compressed,
         } as usize)?;
+
+        let limit = get_limit(path).min(data.len());
+
         if self.is_encrypted() {
             #[cfg(not(feature = "encryption"))]
             return Err(super::Error::Encryption);
@@ -469,8 +503,10 @@ impl Entry {
                     return Err(super::Error::Encrypted);
                 };
                 use aes::cipher::BlockDecrypt;
-                for block in data.chunks_mut(16) {
-                    key.decrypt_block(aes::Block::from_mut_slice(block))
+                for block in data[..limit].chunks_mut(16) {
+                    block.chunks_mut(4).for_each(|c| c.reverse());
+                    key.decrypt_block(aes::Block::from_mut_slice(block));
+                    block.chunks_mut(4).for_each(|c| c.reverse());
                 }
                 data.truncate(self.compressed as usize);
             }

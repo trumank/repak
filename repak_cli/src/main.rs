@@ -9,6 +9,7 @@ use path_clean::PathClean;
 use path_slash::PathExt;
 use rayon::prelude::*;
 use strum::VariantNames;
+use repak::PakVariant;
 
 #[derive(Parser, Debug)]
 struct ActionInfo {
@@ -103,6 +104,14 @@ struct ActionPack {
     #[arg(short, long, default_value = "0")]
     path_hash_seed: u64,
 
+    /// Pak variant for special encryption schemes
+    #[arg(
+        long,
+        default_value_t = PakVariant::Standard,
+        value_parser = clap::builder::PossibleValuesParser::new(PakVariant::VARIANTS).map(|s| s.parse::<PakVariant>().unwrap())
+    )]
+    variant: PakVariant,
+
     /// Verbose
     #[arg(short, long, default_value = "false")]
     verbose: bool,
@@ -161,7 +170,10 @@ impl std::str::FromStr for AesKey {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use aes::cipher::KeyInit;
         use base64::{engine::general_purpose, Engine as _};
-        let try_parse = |bytes: Vec<_>| aes::Aes256::new_from_slice(&bytes).ok().map(AesKey);
+        let try_parse = |mut bytes: Vec<_>| {
+            bytes.chunks_mut(4).for_each(|c| c.reverse());
+            aes::Aes256::new_from_slice(&bytes).ok().map(AesKey)
+        };
         hex::decode(s.strip_prefix("0x").unwrap_or(s))
             .ok()
             .and_then(try_parse)
@@ -184,7 +196,7 @@ fn main() -> Result<(), repak::Error> {
         Action::List(action) => list(aes_key, action),
         Action::HashList(action) => hash_list(aes_key, action),
         Action::Unpack(action) => unpack(aes_key, action),
-        Action::Pack(action) => pack(action),
+        Action::Pack(action) => pack(aes_key, action),
         Action::Get(action) => get(aes_key, action),
     }
 }
@@ -446,7 +458,7 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
     Ok(())
 }
 
-fn pack(args: ActionPack) -> Result<(), repak::Error> {
+fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Error> {
     let output = args.output.map(PathBuf::from).unwrap_or_else(|| {
         // NOTE: don't use `with_extension` here because it will replace e.g. the `.1` in
         // `test_v1.1`.
@@ -476,13 +488,19 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     paths.sort();
 
     let mut pak = repak::PakBuilder::new()
-        .compression(args.compression.iter().cloned())
-        .writer(
-            BufWriter::new(File::create(&output)?),
-            args.version,
-            args.mount_point,
-            Some(args.path_hash_seed),
-        );
+        .variant(args.variant)
+        .compression(args.compression.iter().cloned());
+
+    if let Some(key) = aes_key {
+        pak = pak.key(key);
+    }
+
+    let mut pak = pak.writer(
+        BufWriter::new(File::create(&output)?),
+        args.version,
+        args.mount_point,
+        Some(args.path_hash_seed),
+    );
 
     use indicatif::ProgressIterator;
 

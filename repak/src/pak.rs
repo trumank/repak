@@ -12,6 +12,7 @@ pub struct PakBuilder {
     key: super::Key,
     oodle: super::Oodle,
     allowed_compression: Vec<Compression>,
+    variant: super::PakVariant,
 }
 
 impl Default for PakBuilder {
@@ -29,6 +30,7 @@ impl PakBuilder {
             #[cfg(feature = "oodle_implicit_dynamic")]
             oodle: super::Oodle::Some(oodle_loader::decompress),
             allowed_compression: Default::default(),
+            variant: Default::default(),
         }
     }
     #[cfg(feature = "encryption")]
@@ -46,15 +48,19 @@ impl PakBuilder {
         self.allowed_compression = compression.into_iter().collect();
         self
     }
+    pub fn variant(mut self, variant: super::PakVariant) -> Self {
+        self.variant = variant;
+        self
+    }
     pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
-        PakReader::new_any_inner(reader, self.key, self.oodle)
+        PakReader::new_any_inner(reader, self.key, self.oodle, self.variant)
     }
     pub fn reader_with_version<R: Read + Seek>(
         self,
         reader: &mut R,
         version: super::Version,
     ) -> Result<PakReader, super::Error> {
-        PakReader::new_inner(reader, version, self.key, self.oodle)
+        PakReader::new_inner(reader, version, self.key, self.oodle, self.variant)
     }
     pub fn writer<W: Write + Seek>(
         self,
@@ -70,6 +76,7 @@ impl PakBuilder {
             mount_point,
             path_hash_seed,
             self.allowed_compression,
+            self.variant,
         )
     }
 }
@@ -79,6 +86,7 @@ pub struct PakReader {
     pak: Pak,
     key: super::Key,
     oodle: super::Oodle,
+    variant: super::PakVariant,
 }
 
 #[derive(Debug)]
@@ -87,6 +95,7 @@ pub struct PakWriter<W: Write + Seek> {
     writer: W,
     key: super::Key,
     allowed_compression: Vec<Compression>,
+    variant: super::PakVariant,
 }
 
 #[derive(Debug)]
@@ -154,7 +163,9 @@ fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
     if let super::Key::Some(key) = key {
         use aes::cipher::BlockDecrypt;
         for chunk in bytes.chunks_mut(16) {
-            key.decrypt_block(aes::Block::from_mut_slice(chunk))
+            chunk.chunks_mut(4).for_each(|c| c.reverse());
+            key.decrypt_block(aes::Block::from_mut_slice(chunk));
+            chunk.chunks_mut(4).for_each(|c| c.reverse());
         }
         Ok(())
     } else {
@@ -167,13 +178,14 @@ impl PakReader {
         reader: &mut R,
         key: super::Key,
         oodle: super::Oodle,
+        variant: super::PakVariant,
     ) -> Result<Self, super::Error> {
         use std::fmt::Write;
         let mut log = "\n".to_owned();
 
         for ver in Version::iter() {
             match Pak::read(&mut *reader, ver, &key) {
-                Ok(pak) => return Ok(Self { pak, key, oodle }),
+                Ok(pak) => return Ok(Self { pak, key, oodle, variant }),
                 Err(err) => writeln!(log, "trying version {} failed: {}", ver, err)?,
             }
         }
@@ -185,8 +197,14 @@ impl PakReader {
         version: super::Version,
         key: super::Key,
         oodle: super::Oodle,
+        variant: super::PakVariant,
     ) -> Result<Self, super::Error> {
-        Pak::read(reader, version, &key).map(|pak| Self { pak, key, oodle })
+        Pak::read(reader, version, &key).map(|pak| Self {
+            pak,
+            key,
+            oodle,
+            variant,
+        })
     }
 
     pub fn version(&self) -> super::Version {
@@ -222,14 +240,30 @@ impl PakReader {
         writer: &mut W,
     ) -> Result<(), super::Error> {
         match self.pak.index.entries().get(path) {
-            Some(entry) => entry.read_file(
-                reader,
-                self.pak.version,
-                &self.pak.compression,
-                &self.key,
-                &self.oodle,
-                writer,
-            ),
+            Some(entry) => {
+                let path = format!("{}/{}", self.mount_point(), path);
+
+                let mut last = false;
+                let path = path
+                    .chars()
+                    .filter(|&c| {
+                        let keep = c != '/' || !last;
+                        last = c == '/';
+                        keep
+                    })
+                    .collect::<String>();
+                let path = path.strip_prefix("../../../").unwrap();
+
+                entry.read_file(
+                    reader,
+                    self.pak.version,
+                    &self.pak.compression,
+                    &self.key,
+                    &self.oodle,
+                    writer,
+                    path,
+                )
+            }
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }
     }
@@ -248,6 +282,7 @@ impl PakReader {
             pak: self.pak,
             key: self.key,
             writer,
+            variant: self.variant,
         })
     }
 }
@@ -260,12 +295,14 @@ impl<W: Write + Seek> PakWriter<W> {
         mount_point: String,
         path_hash_seed: Option<u64>,
         allowed_compression: Vec<Compression>,
+        variant: super::PakVariant,
     ) -> Self {
         PakWriter {
             pak: Pak::new(version, mount_point, path_hash_seed),
             writer,
             key,
             allowed_compression,
+            variant,
         }
     }
 
@@ -274,17 +311,17 @@ impl<W: Write + Seek> PakWriter<W> {
     }
 
     pub fn write_file(&mut self, path: &str, data: impl AsRef<[u8]>) -> Result<(), super::Error> {
-        self.pak.index.add_entry(
+        let entry = Entry::write_file(
+            &mut self.writer,
+            self.pak.version,
+            &mut self.pak.compression,
+            &self.allowed_compression,
+            &self.key,
+            self.variant,
             path,
-            Entry::write_file(
-                &mut self.writer,
-                self.pak.version,
-                &mut self.pak.compression,
-                &self.allowed_compression,
-                data,
-            )?,
-        );
-
+            data,
+        )?;
+        self.pak.index.add_entry(path, entry);
         Ok(())
     }
 
@@ -448,10 +485,9 @@ impl Pak {
     fn write<W: Write + Seek>(
         &self,
         writer: &mut W,
-        _key: &super::Key,
+        key: &super::Key,
     ) -> Result<(), super::Error> {
         let index_offset = writer.stream_position()?;
-
         let mut index_buf = vec![];
         let mut index_writer = io::Cursor::new(&mut index_buf);
         index_writer.write_string(&self.mount_point)?;
@@ -566,8 +602,11 @@ impl Pak {
         }
 
         let footer = super::footer::Footer {
-            encryption_uuid: None,
-            encrypted: false,
+            encryption_uuid: match key {
+                super::Key::Some(_) => Some(0x205C5A7D_u128), // Standard UE4 encryption GUID
+                super::Key::None => None,
+            },
+            encrypted: false, // Keep false since we're not encrypting the index yet
             magic: super::MAGIC,
             version: self.version,
             version_major: self.version.version_major(),
@@ -575,11 +614,10 @@ impl Pak {
             index_size: index_buf.len() as u64,
             hash: index_hash,
             frozen: false,
-            compression: self.compression.clone(), // TODO: avoid this clone
+            compression: self.compression.clone(),
         };
 
         footer.write(writer)?;
-
         Ok(())
     }
 }
@@ -677,7 +715,9 @@ fn generate_full_directory_index<W: Write>(
 fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
     use aes::cipher::BlockEncrypt;
     for chunk in bytes.chunks_mut(16) {
-        key.encrypt_block(aes::Block::from_mut_slice(chunk))
+        chunk.chunks_mut(4).for_each(|c| c.reverse());
+        key.encrypt_block(aes::Block::from_mut_slice(chunk));
+        chunk.chunks_mut(4).for_each(|c| c.reverse());
     }
 }
 

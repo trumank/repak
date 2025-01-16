@@ -25,6 +25,7 @@ oodle_loader = { path = "../oodle_loader", optional = true}
 thiserror = "2.0"
 sha1 = { workspace = true }
 strum = { workspace = true }
+blake3 = "1.5.5"
 
 [dev-dependencies]
 base64 = { workspace = true }

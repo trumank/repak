@@ -4,8 +4,9 @@ mod error;
 mod ext;
 mod footer;
 mod pak;
+mod encryption;
 
-pub use {error::*, pak::*};
+pub use {error::*, pak::*, encryption::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
 
@@ -151,4 +152,28 @@ pub(crate) enum Oodle {
     Some(oodle::OodleGetter),
     #[default]
     None,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Debug,
+    strum::Display,
+    strum::FromRepr,
+    strum::EnumIter,
+    strum::EnumString,
+    strum::VariantNames,
+)]
+#[strum(serialize_all = "lowercase")]
+pub enum PakVariant {
+    Standard,
+    NetEase,
+    MarvelRivals,
+}
+
+impl Default for PakVariant {
+    fn default() -> Self {
+        Self::Standard
+    }
 }
