@@ -1,10 +1,11 @@
-use crate::Error;
+use crate::{pad_pkcs7, Error};
 
 use super::{ext::BoolExt, ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::io;
+use std::io::Seek;
 use std::path::Path;
-use aes::cipher::BlockDecrypt;
+use aes::cipher::{BlockDecrypt, BlockEncrypt};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum EntryLocation {
@@ -444,6 +445,43 @@ impl Entry {
         Ok(())
     }
 
+    pub fn encrypt_file_chunk<R: io::Read + io::Seek>(
+        &self,
+        reader: &mut R,
+        version: Version,
+        #[allow(unused)] key: &super::Key,
+        #[allow(unused)] oodle: &super::Oodle,
+        path: &str,
+    ) -> Result<(u64,Vec<u8>), super::Error> {
+        let offset = self.offset;
+        reader.seek(io::SeekFrom::Start(self.offset))?;
+        Entry::read(reader, version)?;
+        let data_offset = reader.stream_position()?;
+
+        let mut data = reader.read_len(self.compressed as usize).unwrap();
+
+        let key = key.get().unwrap();
+
+        pad_pkcs7(&mut data,16);
+
+        let encryption_lim = get_encryption_limit(path).min(data.len());
+
+
+        for block in data[..encryption_lim].chunks_mut(16){
+            if block.len() % 16 !=0{
+            }
+            block.chunks_mut(4).for_each(|c| c.reverse());
+            key.encrypt_block(aes::Block::from_mut_slice(block));
+            block.chunks_mut(4).for_each(|c| c.reverse());
+        }
+
+        // build full data by reading before seek offset
+
+        reader.seek(io::SeekFrom::Start(self.offset))?;
+        let mut pre_data = reader.read_len((data_offset - offset) as usize).unwrap();
+        pre_data.extend_from_slice(&data);
+        Ok((offset,pre_data))
+    }
     pub fn read_file<R: io::Read + io::Seek, W: io::Write>(
         &self,
         reader: &mut R,
@@ -585,6 +623,23 @@ pub fn get_limit(path: &str) -> usize {
         limit as usize
     }
 }
+pub fn get_encryption_limit(path: &str) -> usize {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0x11, 0x22, 0x33, 0x44]);
+    hasher.update(path.to_ascii_lowercase().as_bytes());
+    let limit =
+        ((u64::from_le_bytes(hasher.finalize().as_bytes()[0..8].try_into().unwrap()) % 0x3d) * 63
+            + 319)
+            & 0xffffffffffffffc0;
+    let limit = if limit == 0 {
+        0x1000 as usize
+    } else {
+        limit as usize
+    };
+    // Ensure the limit is aligned to the block size (16 bytes for AES)
+    (limit + 15) & !15
+}
+
 mod test {
     #[test]
     fn test_entry() {

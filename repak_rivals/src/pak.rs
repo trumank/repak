@@ -1,5 +1,5 @@
 use crate::entry::{get_limit, process_chunks, Entry};
-use crate::{Compression, Key};
+use crate::{Compression, Key, Oodle};
 
 use super::ext::{ReadExt, WriteExt};
 use super::{Version, VersionMajor};
@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt::format;
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::SeekFrom::Start;
 use aes::cipher::BlockDecrypt;
 
 #[derive(Debug)]
@@ -243,8 +244,21 @@ impl PakReader {
         reader: &mut R,
         writer: &mut W,
     ) -> Result<(), super::Error> {
+
         match self.pak.index.entries().get(path) {
-            Some(entry) => entry.read_file(
+            Some(entry) => {
+                let path = format!("{}/{}", self.mount_point(), path);
+                let mut last = false;
+                let path = path
+                    .chars()
+                    .filter(|&c| {
+                        let keep = c != '/' || !last;
+                        last = c == '/';
+                        keep
+                    })
+                    .collect::<String>();
+                let path = path.strip_prefix("../../../").unwrap();
+                entry.read_file(
                 reader,
                 self.pak.version,
                 &self.pak.compression,
@@ -253,7 +267,7 @@ impl PakReader {
                 writer,
                 path,
                 self.mount_point()
-            ),
+            )},
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }
     }
@@ -335,9 +349,6 @@ impl Pak {
         println!("Encrypting index");
         let mut encrypted_index = index.clone();
 
-        if encrypted_index.len() % 16 != 0{
-            pad_pkcs7(&mut encrypted_index,16);
-        }
         encrypt(&key, &mut encrypted_index);
 
         let mut index = io::Cursor::new(index);
@@ -347,9 +358,11 @@ impl Pak {
 
         let path_hash_seed = index.read_u64::<LE>()?;
 
+
         let mut encrypted_path_hash_index_buf = if dbg!(index.read_u32::<LE>()?) != 0 {
             let path_hash_index_offset = index.read_u64::<LE>()?;
             let path_hash_index_size = index.read_u64::<LE>()?;
+
             let _path_hash_index_hash = index.read_len(20)?;
 
             reader.seek(io::SeekFrom::Start(path_hash_index_offset))?;
@@ -416,7 +429,6 @@ impl Pak {
         let size = index.read_u32::<LE>()? as usize;
         let encoded_entries = index.read_len(size)?;
 
-        let mut encrypted_entries = encoded_entries.clone();
 
         let mut entries_by_path = BTreeMap::new();
         if let Some(fdi) = &full_directory_index {
@@ -436,31 +448,100 @@ impl Pak {
                         file_name
                     );
 
-                    let path_normalized = format!("{}/{path}",mount_point.strip_prefix("../../../").unwrap());
-                    let limit = get_limit(&path_normalized);
-                    encrypt(&key, &mut encrypted_entries[..limit]);
                     entries_by_path.insert(path, entry);
                 }
             }
         }
         assert_eq!(index.read_u32::<LE>()?, 0, "remaining index bytes are 0"); // TODO possibly remaining unencoded entries?
 
+
+
+        let i = Index {
+            path_hash_seed: Some(path_hash_seed),
+            entries: entries_by_path,
+        };
+
+        let built_pak = Pak {
+            version,
+            mount_point: mount_point.clone(),
+            index_offset: Some(footer.index_offset),
+            index: i,
+            encrypted_index: footer.encrypted,
+            encryption_guid: footer.encryption_uuid,
+            compression: footer.compression.clone(),
+        };
+
         let mut file = File::create("encrypted_output.pak")?;
-
         let mut file = BufWriter::new(file);
-        footer.index_offset = 0;
+
+        let paths =  built_pak.index.entries().keys().cloned().collect::<Vec<String>>();
+
+        let mut entry_list = vec![];
+
+        for path in paths{
+            match built_pak.index.entries.get(&path){
+                None => {
+                    return Err(super::Error::MissingEntry(path.to_owned()));
+                }
+                Some(entry) => {
+                    let path = format!("{}/{}", mount_point, path);
+                    let mut last = false;
+                    let path = path
+                        .chars()
+                        .filter(|&c| {
+                            let keep = c != '/' || !last;
+                            last = c == '/';
+                            keep
+                        })
+                        .collect::<String>();
+                    let path = path.strip_prefix("../../../").unwrap();
+                    let entry = entry.encrypt_file_chunk(
+                        reader,
+                        built_pak.version,
+                        &super::Key::from(key.clone()),
+                        &Oodle::None, // TODO: dont do this
+                        path
+                    ).expect("Failed");
+                    entry_list.push(entry);
+                }
+            }
+        }
+
+        entry_list.sort_by_key(|k|k.0);
+        let mut list_of_intermediary_vecs = vec![];
+
+        entry_list.windows(2).for_each(|f|{
+            let x = f[0].0;
+            let y = f[0].0;
+
+            let delta = y-x;
+            reader.seek(SeekFrom::Start(x+1)).unwrap();
+            let intermediary_data = reader.read_len((delta as usize).saturating_sub(1)).unwrap();
+
+            list_of_intermediary_vecs.push(intermediary_data);
+        });
+
+        assert_eq!(list_of_intermediary_vecs.len(),entry_list.len() - 1);
+
+        for entry in entry_list.iter().zip(list_of_intermediary_vecs.iter()){
+            let (ai, bi) = entry;
+            file.write_all(&ai.1)?;
+            file.write_all(bi)?;
+        }
+
+        reader.seek(Start(entry_list.last().unwrap().0 + 1))?;
+        let delta = footer.index_offset - reader.stream_position()?;
+        let mut data_between_last_entry_and_idx = reader.read_len(delta as usize)?;
+
+        file.write_all(&data_between_last_entry_and_idx)?;
+
+        footer.index_offset = file.stream_position()?;
+        file.write_all(&encrypted_index)?;
+        file.write_all(&encrypted_path_hash_index_buf.unwrap())?;
+        file.write(&encrypted_full_directory_index_buf)?;
+
+
         footer.encrypted = true;
-
-        let mut combined_buffer = Vec::new();
-        combined_buffer.extend_from_slice(&encrypted_index);
-        combined_buffer.extend_from_slice(&encrypted_path_hash_index_buf.unwrap());
-        combined_buffer.extend_from_slice(&encrypted_full_directory_index_buf);
-        combined_buffer.extend_from_slice(&encrypted_entries);
-
-        println!("size of combined buffer = {}",combined_buffer.len());
-        file.write_all(&combined_buffer)?;
-
-
         footer.write(&mut file)?;
         Ok(())
     }
@@ -848,7 +929,7 @@ fn generate_full_directory_index<W: Write>(
 
     Ok(())
 }
-fn pad_pkcs7(data: &mut Vec<u8>, block_size: usize) {
+pub fn pad_pkcs7(data: &mut Vec<u8>, block_size: usize) {
     let padding = block_size - (data.len() % block_size);
     println!("Padding data of length {} with {:?}",data.len(),padding);
     data.extend(vec![padding as u8; padding]);
