@@ -127,7 +127,7 @@ fn url() -> String {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("hash mismatch expected: {expected} got {found}")]
+    #[error("Oodle lib hash mismatch expected: {expected} got {found}")]
     HashMismatch { expected: String, found: String },
     #[error("Oodle compression failed")]
     CompressionFailed,
@@ -137,7 +137,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("ureq error {0:?}")]
     Ureq(Box<ureq::Error>),
-    #[error("libloading error {0:?}")]
+    #[error("Oodle libloading error {0:?}")]
     LibLoading(#[from] libloading::Error),
 }
 impl From<ureq::Error> for Error {
@@ -173,7 +173,8 @@ fn fetch_oodle() -> Result<std::path::PathBuf> {
         check_hash(&buffer)?;
         std::fs::write(&oodle_path, buffer)?;
     }
-    check_hash(&std::fs::read(&oodle_path)?)?;
+    // don't check existing file to allow user to substitute other versions
+    // check_hash(&std::fs::read(&oodle_path)?)?;
     Ok(oodle_path)
 }
 
