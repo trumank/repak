@@ -1,405 +1,298 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{bail, Result};
 
-use std::sync::OnceLock;
+use std::{
+    io::{Read, Write},
+    sync::OnceLock,
+};
 
-type OodleDecompress = fn(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32;
+pub use oodle_lz::{CompressionLevel, Compressor};
 
-#[allow(non_camel_case_types)]
-type OodleLZ_Decompress = unsafe extern "win64" fn(
-    compBuf: *const u8,
-    compBufSize: usize,
-    rawBuf: *mut u8,
-    rawLen: usize,
-    fuzzSafe: u32,
-    checkCRC: u32,
-    verbosity: u32,
-    decBufBase: u64,
-    decBufSize: usize,
-    fpCallback: u64,
-    callbackUserData: u64,
-    decoderMemory: *mut u8,
-    decoderMemorySize: usize,
-    threadPhase: u32,
-) -> i32;
+mod oodle_lz {
+    #[derive(Debug, Clone, Copy)]
+    #[repr(i32)]
+    pub enum Compressor {
+        /// None = memcpy, pass through uncompressed bytes
+        None = 3,
 
-pub fn decompress() -> Result<OodleDecompress, Box<dyn std::error::Error>> {
-    #[cfg(windows)]
-    return Ok(windows_oodle::decompress_wrapper_windows);
-    #[cfg(unix)]
-    return Ok(linux_oodle::oodle_loader_linux());
-}
-
-fn call_decompress(comp_buf: &[u8], raw_buf: &mut [u8], decompress: OodleLZ_Decompress) -> i32 {
-    unsafe {
-        decompress(
-            comp_buf.as_ptr(),
-            comp_buf.len(),
-            raw_buf.as_mut_ptr(),
-            raw_buf.len(),
-            1,
-            1,
-            0,
-            0,
-            0,
-            0,
-            0,
-            std::ptr::null_mut(),
-            0,
-            3,
-        )
-    }
-}
-
-static OODLE_HASH: [u8; 20] = hex_literal::hex!("4bcc73614cb8fd2b0bce8d0f91ee5f3202d9d624");
-static OODLE_DLL_NAME: &str = "oo2core_9_win64.dll";
-
-fn fetch_oodle() -> Result<std::path::PathBuf> {
-    use sha1::{Digest, Sha1};
-
-    let oodle_path = std::env::current_exe()?.with_file_name(OODLE_DLL_NAME);
-
-    if !oodle_path.exists() {
-        let mut compressed = vec![];
-        ureq::get("https://origin.warframe.com/origin/50F7040A/index.txt.lzma")
-            .call()?
-            .into_reader()
-            .read_to_end(&mut compressed)?;
-
-        let mut decompressed = vec![];
-        lzma_rs::lzma_decompress(&mut std::io::Cursor::new(compressed), &mut decompressed).unwrap();
-        let index = String::from_utf8(decompressed)?;
-        let line = index
-            .lines()
-            .find(|l| l.contains(OODLE_DLL_NAME))
-            .with_context(|| format!("{OODLE_DLL_NAME} not found in index"))?;
-        let path = line.split_once(',').context("failed to parse index")?.0;
-
-        let mut compressed = vec![];
-        ureq::get(&format!("https://content.warframe.com{path}"))
-            .call()?
-            .into_reader()
-            .read_to_end(&mut compressed)?;
-
-        let mut decompressed = vec![];
-        lzma_rs::lzma_decompress(&mut std::io::Cursor::new(compressed), &mut decompressed).unwrap();
-
-        std::fs::write(&oodle_path, decompressed)?;
+        /// Fast decompression and high compression ratios, amazing!
+        Kraken = 8,
+        /// Leviathan = Kraken's big brother with higher compression, slightly slower decompression.
+        Leviathan = 13,
+        /// Mermaid is between Kraken & Selkie - crazy fast, still decent compression.
+        Mermaid = 9,
+        /// Selkie is a super-fast relative of Mermaid.  For maximum decode speed.
+        Selkie = 11,
+        /// Hydra, the many-headed beast = Leviathan, Kraken, Mermaid, or Selkie (see $OodleLZ_About_Hydra)
+        Hydra = 12,
     }
 
-    let mut hasher = Sha1::new();
-    hasher.update(std::fs::read(&oodle_path)?);
-    let hash = hasher.finalize();
-    (hash[..] == OODLE_HASH).then_some(()).ok_or_else(|| {
-        anyhow!(
-            "oodle hash mismatch expected: {} got: {} ",
-            hex::encode(OODLE_HASH),
-            hex::encode(hash)
-        )
-    })?;
+    #[derive(Debug, Clone, Copy)]
+    #[repr(i32)]
+    pub enum CompressionLevel {
+        /// don't compress, just copy raw bytes
+        None = 0,
+        /// super fast mode, lower compression ratio
+        SuperFast = 1,
+        /// fastest LZ mode with still decent compression ratio
+        VeryFast = 2,
+        /// fast - good for daily use
+        Fast = 3,
+        /// standard medium speed LZ mode
+        Normal = 4,
 
-    Ok(oodle_path)
+        /// optimal parse level 1 (faster optimal encoder)
+        Optimal1 = 5,
+        /// optimal parse level 2 (recommended baseline optimal encoder)
+        Optimal2 = 6,
+        /// optimal parse level 3 (slower optimal encoder)
+        Optimal3 = 7,
+        /// optimal parse level 4 (very slow optimal encoder)
+        Optimal4 = 8,
+        /// optimal parse level 5 (don't care about encode speed, maximum compression)
+        Optimal5 = 9,
+
+        /// faster than SuperFast, less compression
+        HyperFast1 = -1,
+        /// faster than HyperFast1, less compression
+        HyperFast2 = -2,
+        /// faster than HyperFast2, less compression
+        HyperFast3 = -3,
+        /// fastest, less compression
+        HyperFast4 = -4,
+    }
+
+    pub type Compress = unsafe extern "system" fn(
+        compressor: Compressor,
+        rawBuf: *const u8,
+        rawLen: usize,
+        compBuf: *mut u8,
+        level: CompressionLevel,
+        pOptions: *const (),
+        dictionaryBase: *const (),
+        lrm: *const (),
+        scratchMem: *mut u8,
+        scratchSize: usize,
+    ) -> isize;
+
+    pub type Decompress = unsafe extern "system" fn(
+        compBuf: *const u8,
+        compBufSize: usize,
+        rawBuf: *mut u8,
+        rawLen: usize,
+        fuzzSafe: u32,
+        checkCRC: u32,
+        verbosity: u32,
+        decBufBase: u64,
+        decBufSize: usize,
+        fpCallback: u64,
+        callbackUserData: u64,
+        decoderMemory: *mut u8,
+        decoderMemorySize: usize,
+        threadPhase: u32,
+    ) -> isize;
+
+    pub type GetCompressedBufferSizeNeeded =
+        unsafe extern "system" fn(compressor: Compressor, rawSize: usize) -> usize;
 }
 
-#[cfg(windows)]
-mod windows_oodle {
-    use super::*;
+static OODLE_VERSION: &str = "2.9.10";
+static OODLE_BASE_URL: &str = "https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/EpicGames.Oodle/Sdk/";
 
-    static DECOMPRESS: OnceLock<(OodleLZ_Decompress, libloading::Library)> = OnceLock::new();
-
-    pub fn decompress_wrapper_windows(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32 {
-        let decompress = DECOMPRESS.get_or_init(|| {
-            let path = fetch_oodle().context("failed to fetch oodle").unwrap();
-
-            let lib = unsafe { libloading::Library::new(path) }
-                .context("failed to load oodle")
-                .unwrap();
-
-            (*unsafe { lib.get(b"OodleLZ_Decompress") }.unwrap(), lib)
-        });
-        call_decompress(comp_buf, raw_buf, decompress.0)
-    }
+struct OodlePlatform {
+    path: &'static str,
+    name: &'static str,
+    hash: &'static str,
 }
 
 #[cfg(unix)]
-mod linux_oodle {
+static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
+    path: "linux/lib",
+    name: "liboo2corelinux64.so.9",
+    hash: "ed7e98f70be1254a80644efd3ae442ff61f854a2fe9debb0b978b95289884e9c",
+};
+
+#[cfg(windows)]
+static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
+    path: "win/redist",
+    name: "oo2core_9_win64.dll",
+    hash: "6f5d41a7892ea6b2db420f2458dad2f84a63901c9a93ce9497337b16c195f457",
+};
+
+fn url() -> String {
+    format!(
+        "{OODLE_BASE_URL}/{}/{}/{}",
+        OODLE_VERSION, OODLE_PLATFORM.path, OODLE_PLATFORM.name
+    )
+}
+
+fn check_hash(buffer: &[u8]) -> Result<()> {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(buffer);
+    let hash = hex::encode(hasher.finalize());
+    if hash != OODLE_PLATFORM.hash {
+        anyhow::bail!(
+            "Oodle library hash mismatch: expected {} got {}",
+            OODLE_PLATFORM.hash,
+            hash
+        );
+    }
+
+    Ok(())
+}
+
+fn fetch_oodle() -> Result<std::path::PathBuf> {
+    let oodle_path = std::env::current_exe()?.with_file_name(OODLE_PLATFORM.name);
+    if !oodle_path.exists() {
+        let mut buffer = vec![];
+        ureq::get(&url())
+            .call()?
+            .into_reader()
+            .read_to_end(&mut buffer)?;
+        check_hash(&buffer)?;
+        std::fs::write(&oodle_path, buffer)?;
+    }
+    check_hash(&std::fs::read(&oodle_path)?)?;
+    Ok(oodle_path)
+}
+
+pub struct Oodle {
+    _library: libloading::Library,
+    compress: oodle_lz::Compress,
+    decompress: oodle_lz::Decompress,
+    get_compressed_buffer_size_needed: oodle_lz::GetCompressedBufferSizeNeeded,
+}
+impl Oodle {
+    pub fn compress<S: Write>(
+        &self,
+        input: &[u8],
+        mut output: S,
+        compressor: Compressor,
+        compression_level: CompressionLevel,
+    ) -> Result<usize> {
+        unsafe {
+            let buffer_size = self.get_compressed_buffer_size_needed(compressor, input.len());
+            let mut buffer = vec![0; buffer_size];
+
+            let len = (self.compress)(
+                compressor,
+                input.as_ptr(),
+                input.len(),
+                buffer.as_mut_ptr(),
+                compression_level,
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                0,
+            );
+
+            if len == -1 {
+                bail!("Oodle compression failed");
+            }
+            let len = len as usize;
+
+            output.write_all(&buffer[..len])?;
+
+            Ok(len)
+        }
+    }
+    pub fn decompress(&self, input: &[u8], output: &mut [u8]) -> isize {
+        unsafe {
+            (self.decompress)(
+                input.as_ptr(),
+                input.len(),
+                output.as_mut_ptr(),
+                output.len(),
+                1,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                std::ptr::null_mut(),
+                0,
+                3,
+            )
+        }
+    }
+    fn get_compressed_buffer_size_needed(
+        &self,
+        compressor: oodle_lz::Compressor,
+        raw_buffer: usize,
+    ) -> usize {
+        unsafe { (self.get_compressed_buffer_size_needed)(compressor, raw_buffer) }
+    }
+}
+
+static OODLE: OnceLock<Option<Oodle>> = OnceLock::new();
+
+fn load_oodle() -> Result<Oodle> {
+    let path = fetch_oodle()?;
+    unsafe {
+        let library = libloading::Library::new(path)?;
+
+        Ok(Oodle {
+            compress: *library.get(b"OodleLZ_Compress")?,
+            decompress: *library.get(b"OodleLZ_Decompress")?,
+            get_compressed_buffer_size_needed: *library
+                .get(b"OodleLZ_GetCompressedBufferSizeNeeded")?,
+            _library: library,
+        })
+    }
+}
+
+pub fn oodle() -> Result<&'static Oodle, Box<dyn std::error::Error>> {
+    let mut result = None;
+    let oodle = OODLE.get_or_init(|| match load_oodle() {
+        Err(err) => {
+            result = Some(Err(err));
+            None
+        }
+        Ok(oodle) => Some(oodle),
+    });
+    match (result, oodle) {
+        // oodle initialized so return
+        (_, Some(oodle)) => Ok(oodle),
+        // error during initialization
+        (Some(result), _) => result?,
+        // no error because initialization was tried and failed before
+        _ => Err(anyhow::anyhow!("oodle failed to initialized previously").into()),
+    }
+}
+
+#[cfg(test)]
+mod test {
     use super::*;
 
-    use object::pe::{
-        ImageNtHeaders64, IMAGE_REL_BASED_DIR64, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ,
-        IMAGE_SCN_MEM_WRITE,
-    };
-    use object::read::pe::{ImageOptionalHeader, ImageThunkData, PeFile64};
+    #[test]
+    fn test_oodle() {
+        let oodle = oodle().unwrap();
 
-    use object::{LittleEndian as LE, Object, ObjectSection};
-    use std::collections::HashMap;
-    use std::ffi::{c_void, CStr};
+        let data = b"In tools and when compressing large inputs in one call, consider using
+        $OodleXLZ_Compress_AsyncAndWait (in the Oodle2 Ext lib) instead to get parallelism. Alternatively,
+        chop the data into small fixed size chunks (we recommend at least 256KiB, i.e. 262144 bytes) and
+        call compress on each of them, which decreases compression ratio but makes for trivial parallel
+        compression and decompression.";
 
-    #[repr(C)]
-    struct ThreadInformationBlock {
-        exception_list: *const c_void,
-        stack_base: *const c_void,
-        stack_limit: *const c_void,
-        sub_system_tib: *const c_void,
-        fiber_data: *const c_void,
-        arbitrary_user_pointer: *const c_void,
-        teb: *const c_void,
-    }
-
-    const TIB: ThreadInformationBlock = ThreadInformationBlock {
-        exception_list: std::ptr::null(),
-        stack_base: std::ptr::null(),
-        stack_limit: std::ptr::null(),
-        sub_system_tib: std::ptr::null(),
-        fiber_data: std::ptr::null(),
-        arbitrary_user_pointer: std::ptr::null(),
-        teb: std::ptr::null(),
-    };
-
-    static DECOMPRESS: OnceLock<OodleLZ_Decompress> = OnceLock::new();
-
-    fn decompress_wrapper(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32 {
-        unsafe {
-            // Set GS register in calling thread
-            const ARCH_SET_GS: i32 = 0x1001;
-            libc::syscall(libc::SYS_arch_prctl, ARCH_SET_GS, &TIB);
-
-            // Call actual decompress function
-            call_decompress(comp_buf, raw_buf, *DECOMPRESS.get().unwrap())
-        }
-    }
-
-    #[allow(non_snake_case)]
-    mod imports {
-        use super::*;
-
-        pub unsafe extern "win64" fn OutputDebugStringA(string: *const std::ffi::c_char) {
-            print!("[OODLE] {}", CStr::from_ptr(string).to_string_lossy());
-        }
-        pub unsafe extern "win64" fn GetProcessHeap() -> *const c_void {
-            0x12345678 as *const c_void
-        }
-        pub unsafe extern "win64" fn HeapAlloc(
-            _heap: *const c_void,
-            flags: i32,
-            size: usize,
-        ) -> *const c_void {
-            assert_eq!(0, flags);
-            libc::malloc(size)
-        }
-        pub unsafe extern "win64" fn HeapFree(
-            _heap: *const c_void,
-            _flags: i32,
-            ptr: *mut c_void,
-        ) -> bool {
-            libc::free(ptr);
-            true
-        }
-        pub unsafe extern "win64" fn memset(
-            ptr: *mut c_void,
-            value: i32,
-            num: usize,
-        ) -> *const c_void {
-            libc::memset(ptr, value, num)
-        }
-        pub unsafe extern "win64" fn memmove(
-            destination: *mut c_void,
-            source: *const c_void,
-            num: usize,
-        ) -> *const c_void {
-            libc::memmove(destination, source, num)
-        }
-        pub unsafe extern "win64" fn memcpy(
-            destination: *mut c_void,
-            source: *const c_void,
-            num: usize,
-        ) -> *const c_void {
-            libc::memcpy(destination, source, num)
-        }
-    }
-
-    // Create some unique function pointers to use for unimplemented imports
-    const DEBUG_FNS: [*const fn(); 100] = gen_debug_fns();
-    static mut DEBUG_NAMES: [&str; 100] = [""; 100];
-    const fn gen_debug_fns() -> [*const fn(); 100] {
-        fn log<const I: usize>() {
-            unimplemented!("import {:?}", unsafe { DEBUG_NAMES[I] });
-        }
-        let mut array = [std::ptr::null(); 100];
-        seq_macro::seq!(N in 0..100 {
-            array[N] = log::<N> as *const fn();
-        });
-        array
-    }
-
-    pub fn oodle_loader_linux() -> OodleDecompress {
-        DECOMPRESS.get_or_init(|| get_decompress_inner().unwrap());
-        decompress_wrapper
-    }
-
-    fn get_decompress_inner() -> Result<OodleLZ_Decompress> {
-        fetch_oodle()?;
-        let oodle = std::env::current_exe()
-            .unwrap()
-            .with_file_name(OODLE_DLL_NAME);
-        let dll = std::fs::read(oodle)?;
-
-        let obj_file = PeFile64::parse(&*dll)?;
-
-        let size = obj_file.nt_headers().optional_header.size_of_image() as usize;
-        let header_size = obj_file.nt_headers().optional_header.size_of_headers() as usize;
-
-        let image_base = obj_file.relative_address_base() as usize;
-
-        // Create map
-        let mmap = unsafe {
-            std::slice::from_raw_parts_mut(
-                libc::mmap(
-                    std::ptr::null_mut(),
-                    size,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-                    -1,
-                    0,
-                ) as *mut u8,
-                size,
+        let mut buffer = vec![];
+        oodle
+            .compress(
+                data,
+                &mut buffer,
+                Compressor::Mermaid,
+                CompressionLevel::Optimal5,
             )
-        };
-
-        let map_base = mmap.as_ptr();
-
-        // Copy header to map
-        mmap[0..header_size].copy_from_slice(&dll[0..header_size]);
-        unsafe {
-            assert_eq!(
-                0,
-                libc::mprotect(
-                    mmap.as_mut_ptr() as *mut c_void,
-                    header_size,
-                    libc::PROT_READ
-                )
-            );
-        }
-
-        // Copy section data to map
-        for section in obj_file.sections() {
-            let address = section.address() as usize;
-            let data = section.data()?;
-            mmap[(address - image_base)..(address - image_base + data.len())]
-                .copy_from_slice(section.data()?);
-        }
-
-        // Apply relocations
-        let sections = obj_file.section_table();
-        let mut blocks = obj_file
-            .data_directories()
-            .relocation_blocks(&*dll, &sections)?
             .unwrap();
 
-        while let Some(block) = blocks.next()? {
-            let block_address = block.virtual_address();
-            let block_data = sections.pe_data_at(&*dll, block_address).map(object::Bytes);
-            for reloc in block {
-                let offset = (reloc.virtual_address - block_address) as usize;
-                match reloc.typ {
-                    IMAGE_REL_BASED_DIR64 => {
-                        let addend = block_data
-                            .and_then(|data| data.read_at::<object::U64Bytes<LE>>(offset).ok())
-                            .map(|addend| addend.get(LE));
-                        if let Some(addend) = addend {
-                            mmap[reloc.virtual_address as usize
-                                ..reloc.virtual_address as usize + 8]
-                                .copy_from_slice(&u64::to_le_bytes(
-                                    addend - image_base as u64 + map_base as u64,
-                                ));
-                        }
-                    }
-                    _ => unimplemented!(),
-                }
-            }
-        }
+        std::fs::write("comp.bin", &buffer).unwrap();
+        dbg!((data.len(), buffer.len()));
 
-        // Fix up imports
-        let import_table = obj_file.import_table()?.unwrap();
-        let mut import_descs = import_table.descriptors()?;
+        let mut uncomp = vec![0; data.len()];
+        oodle.decompress(&buffer, &mut uncomp);
 
-        let mut i = 0;
-        while let Some(import_desc) = import_descs.next()? {
-            let mut thunks = import_table.thunks(import_desc.original_first_thunk.get(LE))?;
-
-            let mut address = import_desc.first_thunk.get(LE) as usize;
-            while let Some(thunk) = thunks.next::<ImageNtHeaders64>()? {
-                let (_hint, name) = import_table.hint_name(thunk.address())?;
-                let name = String::from_utf8_lossy(name).to_string();
-
-                use imports::*;
-
-                let fn_addr = match name.as_str() {
-                    "OutputDebugStringA" => OutputDebugStringA as usize,
-                    "GetProcessHeap" => GetProcessHeap as usize,
-                    "HeapAlloc" => HeapAlloc as usize,
-                    "HeapFree" => HeapFree as usize,
-                    "memset" => memset as usize,
-                    "memcpy" => memcpy as usize,
-                    "memmove" => memmove as usize,
-                    _ => {
-                        unsafe { DEBUG_NAMES[i] = name.leak() }
-                        let a = DEBUG_FNS[i] as usize;
-                        i += 1;
-                        a
-                    }
-                };
-
-                mmap[address..address + 8].copy_from_slice(&usize::to_le_bytes(fn_addr));
-
-                address += 8;
-            }
-        }
-
-        // Build export table
-        let mut exports = HashMap::new();
-        for export in obj_file.exports()? {
-            let name = String::from_utf8_lossy(export.name());
-            let address = export.address() - image_base as u64 + map_base as u64;
-            exports.insert(name, address as *const c_void);
-        }
-
-        // Fix section permissions
-        for section in obj_file.sections() {
-            let address = section.address() as usize;
-            let data = section.data()?;
-            let size = data.len();
-
-            let mut permissions = 0;
-
-            let flags = match section.flags() {
-                object::SectionFlags::Coff { characteristics } => characteristics,
-                _ => unreachable!(),
-            };
-
-            if 0 != flags & IMAGE_SCN_MEM_READ {
-                permissions |= libc::PROT_READ;
-            }
-            if 0 != flags & IMAGE_SCN_MEM_WRITE {
-                permissions |= libc::PROT_WRITE;
-            }
-            if 0 != flags & IMAGE_SCN_MEM_EXECUTE {
-                permissions |= libc::PROT_EXEC;
-            }
-
-            unsafe {
-                assert_eq!(
-                    0,
-                    libc::mprotect(
-                        mmap.as_mut_ptr().add(address - image_base) as *mut c_void,
-                        size,
-                        permissions
-                    )
-                );
-            }
-        }
-
-        Ok(unsafe {
-            std::mem::transmute::<*const c_void, OodleLZ_Decompress>(exports["OodleLZ_Decompress"])
-        })
+        assert_eq!(data[..], uncomp[..]);
     }
 }

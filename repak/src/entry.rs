@@ -535,7 +535,7 @@ impl Entry {
                             .min(self.uncompressed as usize - compress_offset)
                     };
                     let buffer = &mut data[range];
-                    let out = oodle(
+                    let out = oodle.decompress(
                         buffer,
                         &mut decompressed[decompress_offset..decompress_offset + decomp],
                     );

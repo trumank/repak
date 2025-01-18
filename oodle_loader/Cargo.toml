@@ -6,18 +6,9 @@ license.workspace = true
 version.workspace = true
 edition.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-libloading = "0.8"
-
-[target.'cfg(unix)'.dependencies]
-object = { version = "0.36.7", default-features = false, features = ["std", "read"] }
-libc = "0.2.169"
-seq-macro = "0.3.5"
-
 [dependencies]
-sha1 = { workspace = true }
+libloading = "0.8"
 ureq = "2.12"
-hex-literal = "0.4"
 hex = { workspace = true }
 anyhow = "1.0.95"
-lzma-rs = "0.3.0"
+sha2 = "0.10.8"

@@ -27,7 +27,7 @@ impl PakBuilder {
             #[cfg(not(feature = "oodle_implicit_dynamic"))]
             oodle: super::Oodle::None,
             #[cfg(feature = "oodle_implicit_dynamic")]
-            oodle: super::Oodle::Some(oodle_loader::decompress),
+            oodle: super::Oodle::Some(oodle_loader::oodle),
             allowed_compression: Default::default(),
         }
     }
