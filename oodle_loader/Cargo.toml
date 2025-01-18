@@ -10,5 +10,5 @@ edition.workspace = true
 libloading = "0.8"
 ureq = "2.12"
 hex = { workspace = true }
-anyhow = "1.0.95"
 sha2 = "0.10.8"
+thiserror = "2.0.11"

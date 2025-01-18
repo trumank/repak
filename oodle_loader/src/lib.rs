@@ -1,9 +1,9 @@
-use anyhow::{bail, Result};
-
 use std::{
     io::{Read, Write},
     sync::OnceLock,
 };
+
+type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub use oodle_lz::{CompressionLevel, Compressor};
 
@@ -125,6 +125,22 @@ fn url() -> String {
     )
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("hash mismatch expected: {expected} got {found}")]
+    HashMismatch { expected: String, found: String },
+    #[error("Oodle compression failed")]
+    CompressionFailed,
+    #[error("Oodle initialization failed previously")]
+    InitializationFailed,
+    #[error("IO error {0:?}")]
+    Io(#[from] std::io::Error),
+    #[error("ureq error {0:?}")]
+    Ureq(#[from] ureq::Error),
+    #[error("libloading error {0:?}")]
+    LibLoading(#[from] libloading::Error),
+}
+
 fn check_hash(buffer: &[u8]) -> Result<()> {
     use sha2::{Digest, Sha256};
 
@@ -132,11 +148,10 @@ fn check_hash(buffer: &[u8]) -> Result<()> {
     hasher.update(buffer);
     let hash = hex::encode(hasher.finalize());
     if hash != OODLE_PLATFORM.hash {
-        anyhow::bail!(
-            "Oodle library hash mismatch: expected {} got {}",
-            OODLE_PLATFORM.hash,
-            hash
-        );
+        return Err(Error::HashMismatch {
+            expected: OODLE_PLATFORM.hash.into(),
+            found: hash,
+        });
     }
 
     Ok(())
@@ -189,7 +204,7 @@ impl Oodle {
             );
 
             if len == -1 {
-                bail!("Oodle compression failed");
+                return Err(Error::CompressionFailed);
             }
             let len = len as usize;
 
@@ -244,7 +259,7 @@ fn load_oodle() -> Result<Oodle> {
     }
 }
 
-pub fn oodle() -> Result<&'static Oodle, Box<dyn std::error::Error>> {
+pub fn oodle() -> Result<&'static Oodle> {
     let mut result = None;
     let oodle = OODLE.get_or_init(|| match load_oodle() {
         Err(err) => {
@@ -259,7 +274,7 @@ pub fn oodle() -> Result<&'static Oodle, Box<dyn std::error::Error>> {
         // error during initialization
         (Some(result), _) => result?,
         // no error because initialization was tried and failed before
-        _ => Err(anyhow::anyhow!("oodle failed to initialized previously").into()),
+        _ => Err(Error::InitializationFailed),
     }
 }
 

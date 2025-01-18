@@ -11,7 +11,7 @@ pub const MAGIC: u32 = 0x5A6F12E1;
 
 #[cfg(feature = "oodle")]
 mod oodle {
-    pub type OodleGetter = fn() -> Result<&'static oodle_loader::Oodle, Box<dyn std::error::Error>>;
+    pub type OodleGetter = fn() -> Result<&'static oodle_loader::Oodle, oodle_loader::Error>;
     pub type OodleDecompress = fn(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32;
 }
 
