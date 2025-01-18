@@ -288,9 +288,9 @@ impl<W: Write + Seek> PakWriter<W> {
         Ok(())
     }
 
-    pub fn parallel<F, E>(&mut self, mut f: F) -> Result<&mut Self, E>
+    pub fn parallel<F, E>(&mut self, f: F) -> Result<&mut Self, E>
     where
-        F: Send + Sync + FnMut(&mut ParallelPakWriter) -> Result<(), E>,
+        F: Send + Sync + FnOnce(&mut ParallelPakWriter) -> Result<(), E>,
         E: From<Error> + Send,
     {
         {
