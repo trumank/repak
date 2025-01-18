@@ -1,4 +1,7 @@
-use crate::ext::{BoolExt, WriteExt};
+use crate::{
+    ext::{BoolExt, WriteExt},
+    Hash,
+};
 
 use super::{ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -13,7 +16,7 @@ pub struct Footer {
     pub version_major: VersionMajor,
     pub index_offset: u64,
     pub index_size: u64,
-    pub hash: [u8; 20],
+    pub hash: Hash,
     pub frozen: bool,
     pub compression: Vec<Option<Compression>>,
 }
@@ -29,7 +32,7 @@ impl Footer {
             VersionMajor::from_repr(reader.read_u32::<LE>()?).unwrap_or(version.version_major());
         let index_offset = reader.read_u64::<LE>()?;
         let index_size = reader.read_u64::<LE>()?;
-        let hash = reader.read_guid()?;
+        let hash = Hash(reader.read_guid()?);
         let frozen = version.version_major() == VersionMajor::FrozenIndex && reader.read_bool()?;
         let compression = {
             let mut compression = Vec::with_capacity(match version {
@@ -91,7 +94,7 @@ impl Footer {
         writer.write_u32::<LE>(self.version_major as u32)?;
         writer.write_u64::<LE>(self.index_offset)?;
         writer.write_u64::<LE>(self.index_size)?;
-        writer.write_all(&self.hash)?;
+        writer.write_all(&self.hash.0)?;
         if self.version_major == VersionMajor::FrozenIndex {
             writer.write_bool(self.frozen)?;
         }

@@ -498,16 +498,19 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         (Output::Stdout, itertools::Either::Right(iter))
     };
     let log = log.clone();
-    iter.try_for_each(|p| {
-        let rel = &p
-            .strip_prefix(input_path)
-            .expect("file not in input directory")
-            .to_slash()
-            .expect("failed to convert to slash path");
-        if args.verbose {
-            log.println(format!("packing {}", &rel));
+    pak.parallel(|writer| -> Result<(), repak::Error> {
+        for p in &mut iter {
+            let rel = &p
+                .strip_prefix(input_path)
+                .expect("file not in input directory")
+                .to_slash()
+                .expect("failed to convert to slash path");
+            if args.verbose {
+                log.println(format!("packing {}", &rel));
+            }
+            writer.write_file(rel.to_string(), std::fs::read(p)?)?;
         }
-        pak.write_file(rel, std::fs::read(p)?)
+        Ok(())
     })?;
 
     pak.write_index()?;

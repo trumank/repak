@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod data;
 mod entry;
 mod error;
 mod ext;

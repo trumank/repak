@@ -1,11 +1,21 @@
+use crate::data::build_partial_entry;
 use crate::entry::Entry;
-use crate::Compression;
+use crate::{Compression, Error};
 
 use super::ext::{ReadExt, WriteExt};
 use super::{Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
+use std::sync::Arc;
+
+#[derive(Default, Clone, Copy)]
+pub(crate) struct Hash(pub(crate) [u8; 20]);
+impl std::fmt::Debug for Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Hash({})", hex::encode(self.0))
+    }
+}
 
 #[derive(Debug)]
 pub struct PakBuilder {
@@ -87,6 +97,10 @@ pub struct PakWriter<W: Write + Seek> {
     writer: W,
     key: super::Key,
     allowed_compression: Vec<Compression>,
+}
+
+pub struct ParallelPakWriter {
+    tx: std::sync::mpsc::SyncSender<(String, Arc<Vec<u8>>)>,
 }
 
 #[derive(Debug)]
@@ -281,16 +295,91 @@ impl<W: Write + Seek> PakWriter<W> {
                 self.pak.version,
                 &mut self.pak.compression,
                 &self.allowed_compression,
-                data,
+                data.as_ref(),
             )?,
         );
 
         Ok(())
     }
 
+    pub fn parallel<F, E>(&mut self, mut f: F) -> Result<&mut Self, E>
+    where
+        F: Send + Sync + FnMut(&mut ParallelPakWriter) -> Result<(), E>,
+        E: From<Error> + Send,
+    {
+        {
+            use pariter::IteratorExt as _;
+
+            let (tx, rx) = std::sync::mpsc::sync_channel(0);
+
+            pariter::scope(|scope| -> Result<(), E> {
+                let handle = scope.spawn(|_| -> Result<(), E> {
+                    f(&mut ParallelPakWriter { tx })?;
+                    Ok(())
+                });
+
+                let result = rx
+                    .into_iter()
+                    .parallel_map_scoped(
+                        scope,
+                        |(path, data): (String, Arc<Vec<u8>>)| -> Result<_, Error> {
+                            let partial_entry =
+                                build_partial_entry(&self.allowed_compression, &data)?;
+                            let data = partial_entry.blocks.is_empty().then(|| Arc::new(data));
+                            Ok((path, data, partial_entry))
+                        },
+                    )
+                    .try_for_each(|message| -> Result<(), Error> {
+                        let stream_position = self.writer.stream_position()?;
+                        let (path, data, partial_entry) = message?;
+
+                        let entry = partial_entry.into_entry(
+                            self.pak.version,
+                            &mut self.pak.compression,
+                            stream_position,
+                        )?;
+
+                        entry.write(
+                            &mut self.writer,
+                            self.pak.version,
+                            crate::entry::EntryLocation::Data,
+                        )?;
+
+                        self.pak.index.add_entry(&path, entry);
+
+                        if let Some(data) = data {
+                            self.writer.write_all(&data)?;
+                        } else {
+                            for block in partial_entry.blocks {
+                                self.writer.write_all(&block.data)?;
+                            }
+                        }
+                        Ok(())
+                    });
+
+                if let Err(err) = handle.join().unwrap() {
+                    Err(err.into()) // prioritize error from user code
+                } else if let Err(err) = result {
+                    Err(err.into()) // user code was successful, check pak writer error
+                } else {
+                    Ok(()) // neither returned error so return success
+                }
+            })
+            .unwrap()?;
+        }
+        Ok(self)
+    }
+
     pub fn write_index(mut self) -> Result<W, super::Error> {
         self.pak.write(&mut self.writer, &self.key)?;
         Ok(self.writer)
+    }
+}
+
+impl ParallelPakWriter {
+    pub fn write_file(&mut self, path: String, data: Vec<u8>) -> Result<(), Error> {
+        self.tx.send((path, Arc::new(data))).unwrap();
+        Ok(())
     }
 }
 
@@ -541,12 +630,12 @@ impl Pak {
             index_writer.write_u32::<LE>(1)?; // we have path hash index
             index_writer.write_u64::<LE>(path_hash_index_offset)?;
             index_writer.write_u64::<LE>(phi_buf.len() as u64)?; // path hash index size
-            index_writer.write_all(&hash(&phi_buf))?;
+            index_writer.write_all(&hash(&phi_buf).0)?;
 
             index_writer.write_u32::<LE>(1)?; // we have full directory index
             index_writer.write_u64::<LE>(full_directory_index_offset)?;
             index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // path hash index size
-            index_writer.write_all(&hash(&fdi_buf))?;
+            index_writer.write_all(&hash(&fdi_buf).0)?;
 
             index_writer.write_u32::<LE>(encoded_entries.len() as u32)?;
             index_writer.write_all(&encoded_entries)?;
@@ -584,11 +673,11 @@ impl Pak {
     }
 }
 
-fn hash(data: &[u8]) -> [u8; 20] {
+fn hash(data: &[u8]) -> Hash {
     use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
     hasher.update(data);
-    hasher.finalize().into()
+    Hash(hasher.finalize().into())
 }
 
 fn generate_path_hash_index<W: Write>(

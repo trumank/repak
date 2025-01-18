@@ -1,7 +1,8 @@
-use crate::Error;
+use crate::{data::build_partial_entry, Error, Hash};
 
 use super::{ext::BoolExt, ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use oodle_loader::oodle;
 use std::io;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -10,7 +11,7 @@ pub(crate) enum EntryLocation {
     Index,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Block {
     pub start: u64,
     pub end: u64,
@@ -55,7 +56,7 @@ pub(crate) struct Entry {
     pub uncompressed: u64,
     pub compression_slot: Option<u32>,
     pub timestamp: Option<u64>,
-    pub hash: Option<[u8; 20]>,
+    pub hash: Option<Hash>,
     pub blocks: Option<Vec<Block>>,
     pub flags: u8,
     pub compression_block_size: u32,
@@ -103,127 +104,19 @@ impl Entry {
         version: Version,
         compression_slots: &mut Vec<Option<Compression>>,
         allowed_compression: &[Compression],
-        data: impl AsRef<[u8]>,
-    ) -> Result<Self, super::Error> {
-        // TODO hash needs to be post-compression
-        use sha1::{Digest, Sha1};
-        let mut hasher = Sha1::new();
-        hasher.update(&data);
-
-        let offset = writer.stream_position()?;
-        let len = data.as_ref().len() as u64;
-
-        // TODO possibly select best compression based on some criteria instead of picking first
-        let compression = allowed_compression.first().cloned();
-
-        let compression_slot = if let Some(compression) = compression {
-            // find existing
-            let slot = compression_slots
-                .iter()
-                .enumerate()
-                .find(|(_, s)| **s == Some(compression));
-            Some(if let Some((i, _)) = slot {
-                // existing found
-                i
-            } else {
-                if version.version_major() < VersionMajor::FNameBasedCompression {
-                    return Err(Error::Other(format!(
-                        "cannot use {compression:?} prior to FNameBasedCompression (pak version 8)"
-                    )));
-                }
-
-                // find empty slot
-                if let Some((i, empty_slot)) = compression_slots
-                    .iter_mut()
-                    .enumerate()
-                    .find(|(_, s)| s.is_none())
-                {
-                    // empty found, set it to used compression type
-                    *empty_slot = Some(compression);
-                    i
-                } else {
-                    // no empty slot found, add a new one
-                    compression_slots.push(Some(compression));
-                    compression_slots.len() - 1
-                }
-            } as u32)
+        data: &[u8],
+    ) -> Result<Self, Error> {
+        let partial_entry = build_partial_entry(allowed_compression, data)?;
+        let stream_position = writer.stream_position()?;
+        let entry = partial_entry.into_entry(version, compression_slots, stream_position)?;
+        entry.write(writer, version, crate::entry::EntryLocation::Data)?;
+        if partial_entry.blocks.is_empty() {
+            writer.write_all(&data)?;
         } else {
-            None
-        };
-
-        let (blocks, compressed) = match compression {
-            #[cfg(not(feature = "compression"))]
-            Some(_) => {
-                unreachable!("should not be able to reach this point without compression feature")
+            for block in partial_entry.blocks {
+                writer.write_all(&block.data)?;
             }
-            #[cfg(feature = "compression")]
-            Some(compression) => {
-                use std::io::Write;
-
-                let entry_size = Entry::get_serialized_size(version, compression_slot, 1);
-                let data_offset = offset + entry_size;
-
-                let compressed = match compression {
-                    Compression::Zlib => {
-                        let mut compress = flate2::write::ZlibEncoder::new(
-                            Vec::new(),
-                            flate2::Compression::fast(),
-                        );
-                        compress.write_all(data.as_ref())?;
-                        compress.finish()?
-                    }
-                    Compression::Gzip => {
-                        let mut compress =
-                            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-                        compress.write_all(data.as_ref())?;
-                        compress.finish()?
-                    }
-                    Compression::Zstd => zstd::stream::encode_all(data.as_ref(), 0)?,
-                    Compression::Oodle => {
-                        return Err(Error::Other("writing Oodle compression unsupported".into()))
-                    }
-                };
-
-                let compute_offset = |index: usize| -> u64 {
-                    match version.version_major() >= VersionMajor::RelativeChunkOffsets {
-                        true => index as u64 + (data_offset - offset),
-                        false => index as u64 + data_offset,
-                    }
-                };
-
-                let blocks = vec![Block {
-                    start: compute_offset(0),
-                    end: compute_offset(compressed.len()),
-                }];
-
-                (Some(blocks), Some(compressed))
-            }
-            None => (None, None),
-        };
-
-        let entry = super::entry::Entry {
-            offset,
-            compressed: compressed
-                .as_ref()
-                .map(|c: &Vec<u8>| c.len() as u64)
-                .unwrap_or(len),
-            uncompressed: len,
-            compression_slot,
-            timestamp: None,
-            hash: Some(hasher.finalize().into()),
-            blocks,
-            flags: 0,
-            compression_block_size: compressed.as_ref().map(|_| len as u32).unwrap_or_default(),
-        };
-
-        entry.write(writer, version, EntryLocation::Data)?;
-
-        if let Some(compressed) = compressed {
-            writer.write_all(&compressed)?;
-        } else {
-            writer.write_all(data.as_ref())?;
         }
-
         Ok(entry)
     }
 
@@ -243,7 +136,7 @@ impl Entry {
             n => Some(n - 1),
         };
         let timestamp = (ver == VersionMajor::Initial).then_try(|| reader.read_u64::<LE>())?;
-        let hash = Some(reader.read_guid()?);
+        let hash = Some(Hash(reader.read_guid()?));
         let blocks = (ver >= VersionMajor::CompressionEncryption && compression.is_some())
             .then_try(|| reader.read_array(Block::read))?;
         let flags = (ver >= VersionMajor::CompressionEncryption)
@@ -287,7 +180,7 @@ impl Entry {
             writer.write_u64::<LE>(self.timestamp.unwrap_or_default())?;
         }
         if let Some(hash) = self.hash {
-            writer.write_all(&hash)?;
+            writer.write_all(&hash.0)?;
         } else {
             panic!("hash missing");
         }
