@@ -20,7 +20,6 @@ impl std::fmt::Debug for Hash {
 #[derive(Debug)]
 pub struct PakBuilder {
     key: super::Key,
-    oodle: super::Oodle,
     allowed_compression: Vec<Compression>,
 }
 
@@ -34,10 +33,6 @@ impl PakBuilder {
     pub fn new() -> Self {
         Self {
             key: Default::default(),
-            #[cfg(not(feature = "oodle_implicit_dynamic"))]
-            oodle: super::Oodle::None,
-            #[cfg(feature = "oodle_implicit_dynamic")]
-            oodle: super::Oodle::Some(oodle_loader::oodle),
             allowed_compression: Default::default(),
         }
     }
@@ -46,25 +41,20 @@ impl PakBuilder {
         self.key = super::Key::Some(key);
         self
     }
-    #[cfg(feature = "oodle_explicit")]
-    pub fn oodle(mut self, oodle_getter: super::oodle::OodleGetter) -> Self {
-        self.oodle = super::Oodle::Some(oodle_getter);
-        self
-    }
     #[cfg(feature = "compression")]
     pub fn compression(mut self, compression: impl IntoIterator<Item = Compression>) -> Self {
         self.allowed_compression = compression.into_iter().collect();
         self
     }
     pub fn reader<R: Read + Seek>(self, reader: &mut R) -> Result<PakReader, super::Error> {
-        PakReader::new_any_inner(reader, self.key, self.oodle)
+        PakReader::new_any_inner(reader, self.key)
     }
     pub fn reader_with_version<R: Read + Seek>(
         self,
         reader: &mut R,
         version: super::Version,
     ) -> Result<PakReader, super::Error> {
-        PakReader::new_inner(reader, version, self.key, self.oodle)
+        PakReader::new_inner(reader, version, self.key)
     }
     pub fn writer<W: Write + Seek>(
         self,
@@ -88,7 +78,6 @@ impl PakBuilder {
 pub struct PakReader {
     pak: Pak,
     key: super::Key,
-    oodle: super::Oodle,
 }
 
 #[derive(Debug)]
@@ -180,14 +169,13 @@ impl PakReader {
     fn new_any_inner<R: Read + Seek>(
         reader: &mut R,
         key: super::Key,
-        oodle: super::Oodle,
     ) -> Result<Self, super::Error> {
         use std::fmt::Write;
         let mut log = "\n".to_owned();
 
         for ver in Version::iter() {
             match Pak::read(&mut *reader, ver, &key) {
-                Ok(pak) => return Ok(Self { pak, key, oodle }),
+                Ok(pak) => return Ok(Self { pak, key }),
                 Err(err) => writeln!(log, "trying version {} failed: {}", ver, err)?,
             }
         }
@@ -198,9 +186,8 @@ impl PakReader {
         reader: &mut R,
         version: super::Version,
         key: super::Key,
-        oodle: super::Oodle,
     ) -> Result<Self, super::Error> {
-        Pak::read(reader, version, &key).map(|pak| Self { pak, key, oodle })
+        Pak::read(reader, version, &key).map(|pak| Self { pak, key })
     }
 
     pub fn version(&self) -> super::Version {
@@ -241,7 +228,6 @@ impl PakReader {
                 self.pak.version,
                 &self.pak.compression,
                 &self.key,
-                &self.oodle,
                 writer,
             ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
@@ -333,7 +319,7 @@ impl<W: Write + Seek> PakWriter<W> {
                         let stream_position = self.writer.stream_position()?;
                         let (path, data, partial_entry) = message?;
 
-                        let entry = partial_entry.into_entry(
+                        let entry = partial_entry.build_entry(
                             self.pak.version,
                             &mut self.pak.compression,
                             stream_position,
@@ -358,7 +344,7 @@ impl<W: Write + Seek> PakWriter<W> {
                     });
 
                 if let Err(err) = handle.join().unwrap() {
-                    Err(err.into()) // prioritize error from user code
+                    Err(err) // prioritize error from user code
                 } else if let Err(err) = result {
                     Err(err.into()) // user code was successful, check pak writer error
                 } else {

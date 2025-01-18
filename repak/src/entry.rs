@@ -2,7 +2,6 @@ use crate::{data::build_partial_entry, Error, Hash};
 
 use super::{ext::BoolExt, ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
-use oodle_loader::oodle;
 use std::io;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -108,10 +107,10 @@ impl Entry {
     ) -> Result<Self, Error> {
         let partial_entry = build_partial_entry(allowed_compression, data)?;
         let stream_position = writer.stream_position()?;
-        let entry = partial_entry.into_entry(version, compression_slots, stream_position)?;
+        let entry = partial_entry.build_entry(version, compression_slots, stream_position)?;
         entry.write(writer, version, crate::entry::EntryLocation::Data)?;
         if partial_entry.blocks.is_empty() {
-            writer.write_all(&data)?;
+            writer.write_all(data)?;
         } else {
             for block in partial_entry.blocks {
                 writer.write_all(&block.data)?;
@@ -341,7 +340,6 @@ impl Entry {
         version: Version,
         compression: &[Option<Compression>],
         #[allow(unused)] key: &super::Key,
-        #[allow(unused)] oodle: &super::Oodle,
         buf: &mut W,
     ) -> Result<(), super::Error> {
         reader.seek(io::SeekFrom::Start(self.offset))?;
@@ -411,10 +409,6 @@ impl Entry {
             }
             #[cfg(feature = "oodle")]
             Some(Compression::Oodle) => {
-                let oodle = match oodle {
-                    crate::Oodle::Some(getter) => getter().map_err(|_| super::Error::OodleFailed),
-                    crate::Oodle::None => Err(super::Error::OodleFailed),
-                }?;
                 let mut decompressed = vec![0; self.uncompressed as usize];
 
                 let mut compress_offset = 0;
@@ -428,7 +422,7 @@ impl Entry {
                             .min(self.uncompressed as usize - compress_offset)
                     };
                     let buffer = &mut data[range];
-                    let out = oodle.decompress(
+                    let out = oodle_loader::oodle()?.decompress(
                         buffer,
                         &mut decompressed[decompress_offset..decompress_offset + decomp],
                     );

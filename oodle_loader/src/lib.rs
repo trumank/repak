@@ -136,9 +136,14 @@ pub enum Error {
     #[error("IO error {0:?}")]
     Io(#[from] std::io::Error),
     #[error("ureq error {0:?}")]
-    Ureq(#[from] ureq::Error),
+    Ureq(Box<ureq::Error>),
     #[error("libloading error {0:?}")]
     LibLoading(#[from] libloading::Error),
+}
+impl From<ureq::Error> for Error {
+    fn from(value: ureq::Error) -> Self {
+        Self::Ureq(value.into())
+    }
 }
 
 fn check_hash(buffer: &[u8]) -> Result<()> {

@@ -10,15 +10,6 @@ pub use {error::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
 
-#[cfg(feature = "oodle")]
-mod oodle {
-    pub type OodleGetter = fn() -> Result<&'static oodle_loader::Oodle, oodle_loader::Error>;
-    pub type OodleDecompress = fn(comp_buf: &[u8], raw_buf: &mut [u8]) -> i32;
-}
-
-#[cfg(feature = "oodle_loader")]
-pub use oodle_loader;
-
 #[derive(
     Clone,
     Copy,
@@ -144,12 +135,4 @@ impl From<aes::Aes256> for Key {
     fn from(value: aes::Aes256) -> Self {
         Self::Some(value)
     }
-}
-
-#[derive(Debug, Default)]
-pub(crate) enum Oodle {
-    #[cfg(feature = "oodle")]
-    Some(oodle::OodleGetter),
-    #[default]
-    None,
 }

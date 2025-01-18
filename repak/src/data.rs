@@ -18,6 +18,7 @@ pub(crate) struct PartialBlock {
     pub(crate) data: Vec<u8>,
 }
 
+#[cfg(feature = "compression")]
 fn get_compression_slot(
     version: Version,
     compression_slots: &mut Vec<Option<Compression>>,
@@ -55,16 +56,19 @@ fn get_compression_slot(
 }
 
 impl PartialEntry {
-    pub(crate) fn into_entry(
+    pub(crate) fn build_entry(
         &self,
         version: Version,
-        compression_slots: &mut Vec<Option<Compression>>,
+        #[allow(unused)] compression_slots: &mut Vec<Option<Compression>>,
         file_offset: u64,
     ) -> Result<Entry> {
+        #[cfg(feature = "compression")]
         let compression_slot = self
             .compression
             .map(|c| get_compression_slot(version, compression_slots, c))
             .transpose()?;
+        #[cfg(not(feature = "compression"))]
+        let compression_slot = None;
 
         let blocks = (!self.blocks.is_empty()).then(|| {
             let entry_size =
@@ -92,7 +96,7 @@ impl PartialEntry {
             uncompressed: self.uncompressed_size,
             compression_slot,
             timestamp: None,
-            hash: Some(self.hash.clone()),
+            hash: Some(self.hash),
             blocks,
             flags: 0,
             compression_block_size: self.compression_block_size,
@@ -101,7 +105,6 @@ impl PartialEntry {
 }
 
 pub(crate) fn build_partial_entry(
-    //version: Version,
     allowed_compression: &[Compression],
     data: &[u8],
 ) -> Result<PartialEntry> {
@@ -138,7 +141,7 @@ pub(crate) fn build_partial_entry(
         }
         None => {
             compression_block_size = 0;
-            hasher.update(&data);
+            hasher.update(data);
             (vec![], uncompressed_size)
         }
     };
@@ -153,6 +156,7 @@ pub(crate) fn build_partial_entry(
     })
 }
 
+#[cfg(feature = "compression")]
 fn compress(compression: Compression, data: &[u8]) -> Result<Vec<u8>> {
     use std::io::Write;
 
@@ -171,18 +175,22 @@ fn compress(compression: Compression, data: &[u8]) -> Result<Vec<u8>> {
         }
         Compression::Zstd => zstd::stream::encode_all(data, 0)?,
         Compression::Oodle => {
-            let mut output = vec![];
-            oodle_loader::oodle()
-                .unwrap()
-                .compress(
-                    data.as_ref(),
-                    &mut output,
-                    oodle_loader::Compressor::Mermaid,
-                    oodle_loader::CompressionLevel::Normal,
-                )
-                .unwrap();
-            output
-            //return Err(Error::Other("writing Oodle compression unsupported".into()))
+            #[cfg(not(feature = "oodle"))]
+            return Err(super::Error::Oodle);
+            #[cfg(feature = "oodle")]
+            {
+                let mut output = vec![];
+                oodle_loader::oodle()
+                    .unwrap()
+                    .compress(
+                        data.as_ref(),
+                        &mut output,
+                        oodle_loader::Compressor::Mermaid,
+                        oodle_loader::CompressionLevel::Normal,
+                    )
+                    .unwrap();
+                output
+            }
         }
     };
 

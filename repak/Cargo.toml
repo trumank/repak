@@ -10,10 +10,7 @@ keywords.workspace = true
 [features]
 default = ["compression", "encryption"]
 compression = ["dep:flate2", "dep:zstd"]
-oodle = []
-oodle_loader = ["dep:oodle_loader"]
-oodle_explicit = ["oodle"]
-oodle_implicit_dynamic = ["dep:oodle_loader", "oodle"]
+oodle = ["dep:oodle_loader"]
 encryption = ["dep:aes"]
 
 [dependencies]

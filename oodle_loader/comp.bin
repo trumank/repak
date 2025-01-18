@@ -1,0 +1,6 @@
+Ì
+In tools and when compressing large inputs in one call, consider using
+        $OodleXLZ_Compress_AsyncAndWait (in the Oodle2 Ext lib) instead to get parallelism. Alternatively,
+        chop the data into small fixed size chunks (we recommend at least 256KiB, i.e. 262144 bytes) and
+        call compress on each of them, which decreases compression ratio but makes for trivial parallel
+        compression and decompression.

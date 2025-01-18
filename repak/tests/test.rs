@@ -183,12 +183,10 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
         Some(0x205C5A7D),
     );
 
-    pak_writer.parallel(|writer| {
-        for path in pak_reader.files() {
-            let data = pak_reader.get(&path, &mut reader).unwrap();
-            writer.write_file(path, data).unwrap();
-        }
-    }).unwrap();
+    for path in pak_reader.files() {
+        let data = pak_reader.get(&path, &mut reader).unwrap();
+        pak_writer.write_file(&path, data).unwrap();
+    }
 
     assert!(pak_writer.write_index().unwrap().into_inner() == reader.into_inner());
 }

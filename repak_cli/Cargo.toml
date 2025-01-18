@@ -19,7 +19,7 @@ path = "src/main.rs"
 
 [features]
 default = ["oodle"]
-oodle = ["repak/oodle_implicit_dynamic"]
+oodle = ["repak/oodle"]
 
 [dependencies]
 repak = { path = "../repak" }
