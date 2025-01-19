@@ -275,19 +275,10 @@ impl Entry {
     }
 
     pub fn write_encoded<W: io::Write>(&self, writer: &mut W) -> Result<(), super::Error> {
-        let compression_block_size = (self.compression_block_size >> 11) & 0x3f;
-        if (compression_block_size << 11) != self.compression_block_size
-            || compression_block_size == 0x3f
-        {
-            // https://github.com/EpicGames/UnrealEngine/commit/3aad0ff7976be1073005dca2c1282af548b45d89
-            panic!(
-                "Unsupported compression block size: {}. Block size must fit into flags field or it may cause unreadable paks for earlier Unreal Engine versions.",
-                self.compression_block_size
-            );
+        let mut compression_block_size = (self.compression_block_size >> 11) & 0x3f;
+        if (compression_block_size << 11) != self.compression_block_size {
+            compression_block_size = 0x3f;
         }
-        //if (compression_block_size << 11) != self.compression_block_size {
-        //    compression_block_size = 0x3f;
-        //}
         let compression_blocks_count = if self.compression_slot.is_some() {
             self.blocks.as_ref().unwrap().len() as u32
         } else {
@@ -307,9 +298,9 @@ impl Entry {
 
         writer.write_u32::<LE>(flags)?;
 
-        //if compression_block_size == 0x3f {
-        //    writer.write_u32::<LE>(self.compression_block_size)?;
-        //}
+        if compression_block_size == 0x3f {
+            writer.write_u32::<LE>(self.compression_block_size)?;
+        }
 
         if is_offset_32_bit_safe {
             writer.write_u32::<LE>(self.offset as u32)?;
