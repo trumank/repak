@@ -174,6 +174,7 @@ fn compress(compression: Compression, data: &[u8]) -> Result<Vec<u8>> {
             compress.finish()?
         }
         Compression::Zstd => zstd::stream::encode_all(data, 0)?,
+        Compression::LZ4 => lz4_flex::block::compress(data),
         Compression::Oodle => {
             #[cfg(not(feature = "oodle"))]
             return Err(super::Error::Oodle);
