@@ -124,6 +124,8 @@ pub(crate) fn build_partial_entry(
         }
         #[cfg(feature = "compression")]
         Some(compression) => {
+            // https://github.com/EpicGames/UnrealEngine/commit/3aad0ff7976be1073005dca2c1282af548b45d89
+            // Block size must fit into flags field or it may cause unreadable paks for earlier Unreal Engine versions
             compression_block_size = 0x10000;
             let mut compressed_size = 0;
             let mut blocks = vec![];
