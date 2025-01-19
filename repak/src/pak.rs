@@ -89,7 +89,7 @@ pub struct PakWriter<W: Write + Seek> {
 }
 
 pub struct ParallelPakWriter {
-    tx: std::sync::mpsc::SyncSender<(String, Arc<Vec<u8>>)>,
+    tx: std::sync::mpsc::SyncSender<(String, bool, Arc<Vec<u8>>)>,
 }
 
 #[derive(Debug)]
@@ -273,14 +273,23 @@ impl<W: Write + Seek> PakWriter<W> {
         self.writer
     }
 
-    pub fn write_file(&mut self, path: &str, data: impl AsRef<[u8]>) -> Result<(), super::Error> {
+    pub fn write_file(
+        &mut self,
+        path: &str,
+        allow_compress: bool,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), super::Error> {
         self.pak.index.add_entry(
             path,
             Entry::write_file(
                 &mut self.writer,
                 self.pak.version,
                 &mut self.pak.compression,
-                &self.allowed_compression,
+                if allow_compress {
+                    &self.allowed_compression
+                } else {
+                    &[]
+                },
                 data.as_ref(),
             )?,
         );
@@ -308,9 +317,13 @@ impl<W: Write + Seek> PakWriter<W> {
                     .into_iter()
                     .parallel_map_scoped(
                         scope,
-                        |(path, data): (String, Arc<Vec<u8>>)| -> Result<_, Error> {
-                            let partial_entry =
-                                build_partial_entry(&self.allowed_compression, &data)?;
+                        |(path, allow_compress, data): (String, bool, Arc<Vec<u8>>)| -> Result<_, Error> {
+                            let allowed_compression = if allow_compress {
+                                self.allowed_compression.as_slice()
+                            } else {
+                                &[]
+                            };
+                            let partial_entry = build_partial_entry(allowed_compression, &data)?;
                             let data = partial_entry.blocks.is_empty().then(|| Arc::new(data));
                             Ok((path, data, partial_entry))
                         },
@@ -363,8 +376,8 @@ impl<W: Write + Seek> PakWriter<W> {
 }
 
 impl ParallelPakWriter {
-    pub fn write_file(&mut self, path: String, data: Vec<u8>) -> Result<(), Error> {
-        self.tx.send((path, Arc::new(data))).unwrap();
+    pub fn write_file(&mut self, path: String, compress: bool, data: Vec<u8>) -> Result<(), Error> {
+        self.tx.send((path, compress, Arc::new(data))).unwrap();
         Ok(())
     }
 }

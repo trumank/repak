@@ -185,7 +185,7 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
 
     for path in pak_reader.files() {
         let data = pak_reader.get(&path, &mut reader).unwrap();
-        pak_writer.write_file(&path, data).unwrap();
+        pak_writer.write_file(&path, false, data).unwrap();
     }
 
     assert!(pak_writer.write_index().unwrap().into_inner() == reader.into_inner());

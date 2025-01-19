@@ -508,7 +508,7 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
             if args.verbose {
                 log.println(format!("packing {}", &rel));
             }
-            writer.write_file(rel.to_string(), std::fs::read(p)?)?;
+            writer.write_file(rel.to_string(), true, std::fs::read(p)?)?;
         }
         Ok(())
     })?;
