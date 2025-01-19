@@ -376,7 +376,7 @@ impl<W: Write + Seek> PakWriter<W> {
 }
 
 impl ParallelPakWriter {
-    pub fn write_file(&mut self, path: String, compress: bool, data: Vec<u8>) -> Result<(), Error> {
+    pub fn write_file(&self, path: String, compress: bool, data: Vec<u8>) -> Result<(), Error> {
         self.tx.send((path, compress, Arc::new(data))).unwrap();
         Ok(())
     }
