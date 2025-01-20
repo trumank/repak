@@ -104,11 +104,18 @@ struct OodlePlatform {
     hash: &'static str,
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
     path: "linux/lib",
     name: "liboo2corelinux64.so.9",
     hash: "ed7e98f70be1254a80644efd3ae442ff61f854a2fe9debb0b978b95289884e9c",
+};
+
+#[cfg(target_os = "macos")]
+static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
+    path: "mac/lib",
+    name: "liboo2coremac64.2.9.10.dylib",
+    hash: "b09af35f6b84a61e2b6488495c7927e1cef789b969128fa1c845e51a475ec501",
 };
 
 #[cfg(windows)]
