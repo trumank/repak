@@ -109,13 +109,7 @@ impl Entry {
         let stream_position = writer.stream_position()?;
         let entry = partial_entry.build_entry(version, compression_slots, stream_position)?;
         entry.write(writer, version, crate::entry::EntryLocation::Data)?;
-        if partial_entry.blocks.is_empty() {
-            writer.write_all(data)?;
-        } else {
-            for block in partial_entry.blocks {
-                writer.write_all(&block.data)?;
-            }
-        }
+        partial_entry.write_data(writer)?;
         Ok(entry)
     }
 

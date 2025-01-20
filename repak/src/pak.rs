@@ -7,7 +7,6 @@ use super::{Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
-use std::sync::Arc;
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct Hash(pub(crate) [u8; 20]);
@@ -88,10 +87,6 @@ pub struct PakWriter<W: Write + Seek> {
     allowed_compression: Vec<Compression>,
 }
 
-pub struct ParallelPakWriter {
-    tx: std::sync::mpsc::SyncSender<(String, bool, Arc<Vec<u8>>)>,
-}
-
 #[derive(Debug)]
 pub(crate) struct Pak {
     version: Version,
@@ -147,8 +142,8 @@ impl Index {
         self.entries
     }
 
-    fn add_entry(&mut self, path: &str, entry: super::entry::Entry) {
-        self.entries.insert(path.to_string(), entry);
+    fn add_entry(&mut self, path: String, entry: super::entry::Entry) {
+        self.entries.insert(path, entry);
     }
 }
 
@@ -280,7 +275,7 @@ impl<W: Write + Seek> PakWriter<W> {
         data: impl AsRef<[u8]>,
     ) -> Result<(), super::Error> {
         self.pak.index.add_entry(
-            path,
+            path.to_string(),
             Entry::write_file(
                 &mut self.writer,
                 self.pak.version,
@@ -297,75 +292,56 @@ impl<W: Write + Seek> PakWriter<W> {
         Ok(())
     }
 
-    pub fn parallel<F, E>(&mut self, f: F) -> Result<&mut Self, E>
+    pub fn parallel<'scope, F, E>(&mut self, f: F) -> Result<&mut Self, E>
     where
-        F: Send + Sync + FnOnce(&mut ParallelPakWriter) -> Result<(), E>,
+        F: Send + Sync + FnOnce(&mut ParallelPakWriter<'scope>) -> Result<(), E>,
         E: From<Error> + Send,
     {
-        {
-            use pariter::IteratorExt as _;
+        use pariter::IteratorExt as _;
 
+        let allowed_compression = self.allowed_compression.as_slice();
+        pariter::scope(|scope: &pariter::Scope<'_>| -> Result<(), E> {
             let (tx, rx) = std::sync::mpsc::sync_channel(0);
 
-            pariter::scope(|scope| -> Result<(), E> {
-                let handle = scope.spawn(|_| -> Result<(), E> {
-                    f(&mut ParallelPakWriter { tx })?;
+            let handle = scope.spawn(|_| f(&mut ParallelPakWriter { tx }));
+
+            let result = rx
+                .into_iter()
+                .parallel_map_scoped(scope, |(path, compress, data)| -> Result<_, Error> {
+                    let compression = compress.then_some(allowed_compression).unwrap_or_default();
+                    let partial_entry = build_partial_entry(compression, data)?;
+                    Ok((path, partial_entry))
+                })
+                .try_for_each(|message| -> Result<(), Error> {
+                    let stream_position = self.writer.stream_position()?;
+                    let (path, partial_entry) = message?;
+
+                    let entry = partial_entry.build_entry(
+                        self.pak.version,
+                        &mut self.pak.compression,
+                        stream_position,
+                    )?;
+
+                    entry.write(
+                        &mut self.writer,
+                        self.pak.version,
+                        crate::entry::EntryLocation::Data,
+                    )?;
+
+                    self.pak.index.add_entry(path, entry);
+                    partial_entry.write_data(&mut self.writer)?;
                     Ok(())
                 });
 
-                let result = rx
-                    .into_iter()
-                    .parallel_map_scoped(
-                        scope,
-                        |(path, allow_compress, data): (String, bool, Arc<Vec<u8>>)| -> Result<_, Error> {
-                            let allowed_compression = if allow_compress {
-                                self.allowed_compression.as_slice()
-                            } else {
-                                &[]
-                            };
-                            let partial_entry = build_partial_entry(allowed_compression, &data)?;
-                            let data = partial_entry.blocks.is_empty().then(|| Arc::new(data));
-                            Ok((path, data, partial_entry))
-                        },
-                    )
-                    .try_for_each(|message| -> Result<(), Error> {
-                        let stream_position = self.writer.stream_position()?;
-                        let (path, data, partial_entry) = message?;
-
-                        let entry = partial_entry.build_entry(
-                            self.pak.version,
-                            &mut self.pak.compression,
-                            stream_position,
-                        )?;
-
-                        entry.write(
-                            &mut self.writer,
-                            self.pak.version,
-                            crate::entry::EntryLocation::Data,
-                        )?;
-
-                        self.pak.index.add_entry(&path, entry);
-
-                        if let Some(data) = data {
-                            self.writer.write_all(&data)?;
-                        } else {
-                            for block in partial_entry.blocks {
-                                self.writer.write_all(&block.data)?;
-                            }
-                        }
-                        Ok(())
-                    });
-
-                if let Err(err) = handle.join().unwrap() {
-                    Err(err) // prioritize error from user code
-                } else if let Err(err) = result {
-                    Err(err.into()) // user code was successful, check pak writer error
-                } else {
-                    Ok(()) // neither returned error so return success
-                }
-            })
-            .unwrap()?;
-        }
+            if let Err(err) = handle.join().unwrap() {
+                Err(err) // prioritize error from user code
+            } else if let Err(err) = result {
+                Err(err.into()) // user code was successful, check pak writer error
+            } else {
+                Ok(()) // neither returned error so return success
+            }
+        })
+        .unwrap()?;
         Ok(self)
     }
 
@@ -375,10 +351,27 @@ impl<W: Write + Seek> PakWriter<W> {
     }
 }
 
-impl ParallelPakWriter {
-    pub fn write_file(&self, path: String, compress: bool, data: Vec<u8>) -> Result<(), Error> {
-        self.tx.send((path, compress, Arc::new(data))).unwrap();
+pub struct ParallelPakWriter<'scope> {
+    tx: std::sync::mpsc::SyncSender<(String, bool, Data<'scope>)>,
+}
+impl<'scope> ParallelPakWriter<'scope> {
+    pub fn write_file<D: AsRef<[u8]> + Send + Sync + 'scope>(
+        &self,
+        path: String,
+        compress: bool,
+        data: D,
+    ) -> Result<(), Error> {
+        self.tx
+            .send((path, compress, Data(Box::new(data))))
+            .unwrap();
         Ok(())
+    }
+}
+
+struct Data<'d>(Box<dyn AsRef<[u8]> + Send + Sync + 'd>);
+impl AsRef<[u8]> for Data<'_> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref().as_ref()
     }
 }
 

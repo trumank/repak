@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use crate::{
     entry::{Block, Entry},
     Compression, Error, Hash, Version, VersionMajor,
@@ -5,17 +7,21 @@ use crate::{
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-pub(crate) struct PartialEntry {
+pub(crate) struct PartialEntry<D: AsRef<[u8]>> {
     compression: Option<Compression>,
     compressed_size: u64,
     uncompressed_size: u64,
     compression_block_size: u32,
-    pub(crate) blocks: Vec<PartialBlock>,
+    data: PartialEntryData<D>,
     hash: Hash,
 }
 pub(crate) struct PartialBlock {
     uncompressed_size: usize,
-    pub(crate) data: Vec<u8>,
+    data: Vec<u8>,
+}
+pub(crate) enum PartialEntryData<D> {
+    Slice(D),
+    Blocks(Vec<PartialBlock>),
 }
 
 #[cfg(feature = "compression")]
@@ -55,7 +61,7 @@ fn get_compression_slot(
     } as u32)
 }
 
-impl PartialEntry {
+impl<D: AsRef<[u8]>> PartialEntry<D> {
     pub(crate) fn build_entry(
         &self,
         version: Version,
@@ -70,25 +76,30 @@ impl PartialEntry {
         #[cfg(not(feature = "compression"))]
         let compression_slot = None;
 
-        let blocks = (!self.blocks.is_empty()).then(|| {
-            let entry_size =
-                Entry::get_serialized_size(version, compression_slot, self.blocks.len() as u32);
+        let blocks = match &self.data {
+            PartialEntryData::Slice(_) => None,
+            PartialEntryData::Blocks(blocks) => {
+                let entry_size =
+                    Entry::get_serialized_size(version, compression_slot, blocks.len() as u32);
 
-            let mut offset = entry_size;
-            if version.version_major() < VersionMajor::RelativeChunkOffsets {
-                offset += file_offset;
-            };
+                let mut offset = entry_size;
+                if version.version_major() < VersionMajor::RelativeChunkOffsets {
+                    offset += file_offset;
+                };
 
-            self.blocks
-                .iter()
-                .map(|block| {
-                    let start = offset;
-                    offset += block.data.len() as u64;
-                    let end = offset;
-                    Block { start, end }
-                })
-                .collect()
-        });
+                Some(
+                    blocks
+                        .iter()
+                        .map(|block| {
+                            let start = offset;
+                            offset += block.data.len() as u64;
+                            let end = offset;
+                            Block { start, end }
+                        })
+                        .collect(),
+                )
+            }
+        };
 
         Ok(Entry {
             offset: file_offset,
@@ -102,22 +113,38 @@ impl PartialEntry {
             compression_block_size: self.compression_block_size,
         })
     }
+    pub(crate) fn write_data<S: Write>(&self, stream: &mut S) -> Result<()> {
+        match &self.data {
+            PartialEntryData::Slice(data) => {
+                stream.write_all(data.as_ref())?;
+            }
+            PartialEntryData::Blocks(blocks) => {
+                for block in blocks {
+                    stream.write_all(&block.data)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
-pub(crate) fn build_partial_entry(
+pub(crate) fn build_partial_entry<D>(
     allowed_compression: &[Compression],
-    data: &[u8],
-) -> Result<PartialEntry> {
+    data: D,
+) -> Result<PartialEntry<D>>
+where
+    D: AsRef<[u8]>,
+{
     // TODO hash needs to be post-compression/encryption
     use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
 
     // TODO possibly select best compression based on some criteria instead of picking first
     let compression = allowed_compression.first().cloned();
-    let uncompressed_size = data.len() as u64;
+    let uncompressed_size = data.as_ref().len() as u64;
     let compression_block_size;
 
-    let (blocks, compressed_size) = match compression {
+    let (data, compressed_size) = match compression {
         #[cfg(not(feature = "compression"))]
         Some(_) => {
             unreachable!("should not be able to reach this point without compression feature")
@@ -129,7 +156,7 @@ pub(crate) fn build_partial_entry(
             compression_block_size = 0x10000;
             let mut compressed_size = 0;
             let mut blocks = vec![];
-            for chunk in data.chunks(compression_block_size as usize) {
+            for chunk in data.as_ref().chunks(compression_block_size as usize) {
                 let data = compress(compression, chunk)?;
                 compressed_size += data.len() as u64;
                 hasher.update(&data);
@@ -139,12 +166,12 @@ pub(crate) fn build_partial_entry(
                 })
             }
 
-            (blocks, compressed_size)
+            (PartialEntryData::Blocks(blocks), compressed_size)
         }
         None => {
             compression_block_size = 0;
-            hasher.update(data);
-            (vec![], uncompressed_size)
+            hasher.update(data.as_ref());
+            (PartialEntryData::Slice(data), uncompressed_size)
         }
     };
 
@@ -153,7 +180,7 @@ pub(crate) fn build_partial_entry(
         compressed_size,
         uncompressed_size,
         compression_block_size,
-        blocks,
+        data,
         hash: Hash(hasher.finalize().into()),
     })
 }
