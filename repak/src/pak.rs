@@ -294,7 +294,7 @@ impl<W: Write + Seek> PakWriter<W> {
 
     pub fn parallel<'scope, F, E>(&mut self, f: F) -> Result<&mut Self, E>
     where
-        F: Send + Sync + FnOnce(&mut ParallelPakWriter<'scope>) -> Result<(), E>,
+        F: Send + Sync + FnOnce(ParallelPakWriter<'scope>) -> Result<(), E>,
         E: From<Error> + Send,
     {
         use pariter::IteratorExt as _;
@@ -303,7 +303,7 @@ impl<W: Write + Seek> PakWriter<W> {
         pariter::scope(|scope: &pariter::Scope<'_>| -> Result<(), E> {
             let (tx, rx) = std::sync::mpsc::sync_channel(0);
 
-            let handle = scope.spawn(|_| f(&mut ParallelPakWriter { tx }));
+            let handle = scope.spawn(|_| f(ParallelPakWriter { tx }));
 
             let result = rx
                 .into_iter()
