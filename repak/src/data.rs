@@ -7,7 +7,7 @@ use crate::{
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-pub(crate) struct PartialEntry<D: AsRef<[u8]>> {
+pub struct PartialEntry<D: AsRef<[u8]>> {
     compression: Option<Compression>,
     compressed_size: u64,
     uncompressed_size: u64,

@@ -6,7 +6,7 @@ mod ext;
 mod footer;
 mod pak;
 
-pub use {error::*, pak::*};
+pub use {data::PartialEntry, error::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
 

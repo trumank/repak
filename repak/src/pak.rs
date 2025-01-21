@@ -1,6 +1,6 @@
 use crate::data::build_partial_entry;
 use crate::entry::Entry;
-use crate::{Compression, Error};
+use crate::{Compression, Error, PartialEntry};
 
 use super::ext::{ReadExt, WriteExt};
 use super::{Version, VersionMajor};
@@ -292,6 +292,37 @@ impl<W: Write + Seek> PakWriter<W> {
         Ok(())
     }
 
+    pub fn entry_builder(&self) -> EntryBuilder {
+        EntryBuilder {
+            allowed_compression: self.allowed_compression.clone(),
+        }
+    }
+
+    pub fn write_entry<D: AsRef<[u8]>>(
+        &mut self,
+        path: String,
+        partial_entry: PartialEntry<D>,
+    ) -> Result<(), Error> {
+        let stream_position = self.writer.stream_position()?;
+
+        let entry = partial_entry.build_entry(
+            self.pak.version,
+            &mut self.pak.compression,
+            stream_position,
+        )?;
+
+        entry.write(
+            &mut self.writer,
+            self.pak.version,
+            crate::entry::EntryLocation::Data,
+        )?;
+
+        self.pak.index.add_entry(path, entry);
+        partial_entry.write_data(&mut self.writer)?;
+
+        Ok(())
+    }
+
     pub fn parallel<'scope, F, E>(&mut self, f: F) -> Result<&mut Self, E>
     where
         F: Send + Sync + FnOnce(ParallelPakWriter<'scope>) -> Result<(), E>,
@@ -299,38 +330,20 @@ impl<W: Write + Seek> PakWriter<W> {
     {
         use pariter::IteratorExt as _;
 
-        let allowed_compression = self.allowed_compression.as_slice();
         pariter::scope(|scope: &pariter::Scope<'_>| -> Result<(), E> {
             let (tx, rx) = std::sync::mpsc::sync_channel(0);
 
             let handle = scope.spawn(|_| f(ParallelPakWriter { tx }));
+            let entry_builder = self.entry_builder();
 
             let result = rx
                 .into_iter()
-                .parallel_map_scoped(scope, |(path, compress, data)| -> Result<_, Error> {
-                    let compression = compress.then_some(allowed_compression).unwrap_or_default();
-                    let partial_entry = build_partial_entry(compression, data)?;
-                    Ok((path, partial_entry))
+                .parallel_map_scoped(scope, move |(path, compress, data)| -> Result<_, Error> {
+                    Ok((path, entry_builder.build_entry(compress, data)?))
                 })
                 .try_for_each(|message| -> Result<(), Error> {
-                    let stream_position = self.writer.stream_position()?;
                     let (path, partial_entry) = message?;
-
-                    let entry = partial_entry.build_entry(
-                        self.pak.version,
-                        &mut self.pak.compression,
-                        stream_position,
-                    )?;
-
-                    entry.write(
-                        &mut self.writer,
-                        self.pak.version,
-                        crate::entry::EntryLocation::Data,
-                    )?;
-
-                    self.pak.index.add_entry(path, entry);
-                    partial_entry.write_data(&mut self.writer)?;
-                    Ok(())
+                    self.write_entry(path, partial_entry)
                 });
 
             if let Err(err) = handle.join().unwrap() {
@@ -372,6 +385,24 @@ struct Data<'d>(Box<dyn AsRef<[u8]> + Send + Sync + 'd>);
 impl AsRef<[u8]> for Data<'_> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref().as_ref()
+    }
+}
+
+#[derive(Clone)]
+pub struct EntryBuilder {
+    allowed_compression: Vec<Compression>,
+}
+impl EntryBuilder {
+    /// Builds an entry in memory (compressed if requested) which must be written out later
+    pub fn build_entry<D: AsRef<[u8]> + Send + Sync>(
+        &self,
+        compress: bool,
+        data: D,
+    ) -> Result<PartialEntry<D>, Error> {
+        let compression = compress
+            .then_some(self.allowed_compression.as_slice())
+            .unwrap_or_default();
+        build_partial_entry(compression, data)
     }
 }
 
