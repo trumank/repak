@@ -322,62 +322,9 @@ impl<W: Write + Seek> PakWriter<W> {
 
         Ok(())
     }
-
-    pub fn parallel<'scope, F, E>(&mut self, f: F) -> Result<&mut Self, E>
-    where
-        F: Send + Sync + FnOnce(ParallelPakWriter<'scope>) -> Result<(), E>,
-        E: From<Error> + Send,
-    {
-        use pariter::IteratorExt as _;
-
-        pariter::scope(|scope: &pariter::Scope<'_>| -> Result<(), E> {
-            let (tx, rx) = std::sync::mpsc::sync_channel(0);
-
-            let handle = scope.spawn(|_| f(ParallelPakWriter { tx }));
-            let entry_builder = self.entry_builder();
-
-            let result = rx
-                .into_iter()
-                .parallel_map_scoped(scope, move |(path, compress, data)| -> Result<_, Error> {
-                    Ok((path, entry_builder.build_entry(compress, data)?))
-                })
-                .try_for_each(|message| -> Result<(), Error> {
-                    let (path, partial_entry) = message?;
-                    self.write_entry(path, partial_entry)
-                });
-
-            if let Err(err) = handle.join().unwrap() {
-                Err(err) // prioritize error from user code
-            } else if let Err(err) = result {
-                Err(err.into()) // user code was successful, check pak writer error
-            } else {
-                Ok(()) // neither returned error so return success
-            }
-        })
-        .unwrap()?;
-        Ok(self)
-    }
-
     pub fn write_index(mut self) -> Result<W, super::Error> {
         self.pak.write(&mut self.writer, &self.key)?;
         Ok(self.writer)
-    }
-}
-
-pub struct ParallelPakWriter<'scope> {
-    tx: std::sync::mpsc::SyncSender<(String, bool, Data<'scope>)>,
-}
-impl<'scope> ParallelPakWriter<'scope> {
-    pub fn write_file<D: AsRef<[u8]> + Send + Sync + 'scope>(
-        &self,
-        path: String,
-        compress: bool,
-        data: D,
-    ) -> Result<(), Error> {
-        self.tx
-            .send((path, compress, Data(Box::new(data))))
-            .unwrap();
-        Ok(())
     }
 }
 

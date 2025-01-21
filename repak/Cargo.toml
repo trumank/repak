@@ -23,7 +23,6 @@ oodle_loader = { path = "../oodle_loader", optional = true}
 thiserror = "2.0"
 sha1 = { workspace = true }
 strum = { workspace = true }
-pariter = "0.5.1"
 hex.workspace = true
 
 [dev-dependencies]

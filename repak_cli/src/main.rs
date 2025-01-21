@@ -487,7 +487,7 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     use indicatif::ProgressIterator;
 
     let iter = paths.iter();
-    let (log, mut iter) = if !args.quiet {
+    let (log, iter) = if !args.quiet {
         let iter =
             iter.progress_with_style(indicatif::ProgressStyle::with_template(STYLE).unwrap());
         (
@@ -498,20 +498,39 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         (Output::Stdout, itertools::Either::Right(iter))
     };
     let log = log.clone();
-    pak.parallel(|writer| -> Result<(), repak::Error> {
-        for p in &mut iter {
-            let rel = &p
-                .strip_prefix(input_path)
-                .expect("file not in input directory")
-                .to_slash()
-                .expect("failed to convert to slash path");
-            if args.verbose {
-                log.println(format!("packing {}", &rel));
-            }
-            writer.write_file(rel.to_string(), true, std::fs::read(p)?)?;
+
+    let mut result = None;
+    let result_ref = &mut result;
+    rayon::in_place_scope(|scope| -> Result<(), repak::Error> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(0);
+        let entry_builder = pak.entry_builder();
+
+        scope.spawn(move |_| {
+            *result_ref = Some(
+                iter.par_bridge()
+                    .try_for_each(|p| -> Result<(), repak::Error> {
+                        let rel = &p
+                            .strip_prefix(input_path)
+                            .expect("file not in input directory")
+                            .to_slash()
+                            .expect("failed to convert to slash path");
+                        if args.verbose {
+                            log.println(format!("packing {}", &rel));
+                        }
+                        let entry = entry_builder.build_entry(true, std::fs::read(p)?)?;
+
+                        tx.send((rel.to_string(), entry)).unwrap();
+                        Ok(())
+                    }),
+            );
+        });
+
+        for (path, entry) in rx {
+            pak.write_entry(path, entry)?;
         }
         Ok(())
     })?;
+    result.unwrap()?;
 
     pak.write_index()?;
 

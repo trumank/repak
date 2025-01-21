@@ -88,33 +88,6 @@ mod test {
     }
 }
 
-#[test]
-fn test_parallel_writer() -> Result<(), repak::Error> {
-    let mut cur = Cursor::new(vec![]);
-    let mut writer = repak::PakBuilder::new().writer(
-        &mut cur,
-        repak::Version::V11,
-        "../../../".to_string(),
-        Some(0x12345678),
-    );
-
-    let outside_scope1 = vec![1, 2, 3];
-    let outside_scope2 = vec![4, 5, 6];
-
-    writer.parallel(|writer| -> Result<(), repak::Error> {
-        let inside_scope = vec![7, 8, 9];
-
-        writer.write_file("pass/takes/ownership".to_string(), true, outside_scope1)?;
-        writer.write_file("pass/outlives/scope".to_string(), true, &outside_scope2)?;
-
-        writer.write_file("pass/takes/ownership".to_string(), true, inside_scope)?;
-        // writer.write_file("fail/doesnt/outlive/scope".to_string(), true, &inside_scope)?;
-        Ok(())
-    })?;
-
-    Ok(())
-}
-
 static AES_KEY: &str = "lNJbw660IOC+kU7cnVQ1oeqrXyhk4J6UAZrCBbcnp94=";
 
 fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
