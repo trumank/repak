@@ -315,7 +315,6 @@ mod test {
             )
             .unwrap();
 
-        std::fs::write("comp.bin", &buffer).unwrap();
         dbg!((data.len(), buffer.len()));
 
         let mut uncomp = vec![0; data.len()];
