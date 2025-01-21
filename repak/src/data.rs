@@ -209,17 +209,11 @@ fn compress(compression: Compression, data: &[u8]) -> Result<Vec<u8>> {
             return Err(super::Error::Oodle);
             #[cfg(feature = "oodle")]
             {
-                let mut output = vec![];
-                oodle_loader::oodle()
-                    .unwrap()
-                    .compress(
-                        data.as_ref(),
-                        &mut output,
-                        oodle_loader::Compressor::Mermaid,
-                        oodle_loader::CompressionLevel::Normal,
-                    )
-                    .unwrap();
-                output
+                oodle_loader::oodle().unwrap().compress(
+                    data.as_ref(),
+                    oodle_loader::Compressor::Mermaid,
+                    oodle_loader::CompressionLevel::Normal,
+                )?
             }
         }
     };

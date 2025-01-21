@@ -1,7 +1,4 @@
-use std::{
-    io::{Read, Write},
-    sync::OnceLock,
-};
+use std::{io::Read, sync::OnceLock};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -192,13 +189,12 @@ pub struct Oodle {
     get_compressed_buffer_size_needed: oodle_lz::GetCompressedBufferSizeNeeded,
 }
 impl Oodle {
-    pub fn compress<S: Write>(
+    pub fn compress(
         &self,
         input: &[u8],
-        mut output: S,
         compressor: Compressor,
         compression_level: CompressionLevel,
-    ) -> Result<usize> {
+    ) -> Result<Vec<u8>> {
         unsafe {
             let buffer_size = self.get_compressed_buffer_size_needed(compressor, input.len());
             let mut buffer = vec![0; buffer_size];
@@ -219,11 +215,9 @@ impl Oodle {
             if len == -1 {
                 return Err(Error::CompressionFailed);
             }
-            let len = len as usize;
+            buffer.truncate(len as usize);
 
-            output.write_all(&buffer[..len])?;
-
-            Ok(len)
+            Ok(buffer)
         }
     }
     pub fn decompress(&self, input: &[u8], output: &mut [u8]) -> isize {
@@ -305,14 +299,8 @@ mod test {
         call compress on each of them, which decreases compression ratio but makes for trivial parallel
         compression and decompression.";
 
-        let mut buffer = vec![];
-        oodle
-            .compress(
-                data,
-                &mut buffer,
-                Compressor::Mermaid,
-                CompressionLevel::Optimal5,
-            )
+        let buffer = oodle
+            .compress(data, Compressor::Mermaid, CompressionLevel::Optimal5)
             .unwrap();
 
         dbg!((data.len(), buffer.len()));
