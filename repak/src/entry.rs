@@ -416,43 +416,49 @@ impl Entry {
             #[cfg(not(feature = "compression"))]
             _ => return Err(super::Error::Compression),
             #[cfg(feature = "compression")]
-            Some(comp) => match comp {
-                Compression::Zlib => decompress!(flate2::read::ZlibDecoder<&[u8]>),
-                Compression::Gzip => decompress!(flate2::read::GzDecoder<&[u8]>),
-                Compression::Zstd => {
-                    for range in ranges {
-                        io::copy(&mut zstd::stream::read::Decoder::new(&data[range])?, buf)?;
-                    }
-                }
-                Compression::LZ4 => {
-                    let mut decompressed = vec![0; self.uncompressed as usize];
-                    for (decomp_chunk, comp_range) in decompressed
-                        .chunks_mut(self.compression_block_size as usize)
-                        .zip(ranges)
-                    {
-                        lz4_flex::block::decompress_into(&data[comp_range], decomp_chunk)
-                            .map_err(|_| Error::DecompressionFailed(Compression::LZ4))?;
-                    }
-                    buf.write_all(&decompressed)?;
-                }
-                #[cfg(feature = "oodle")]
-                Compression::Oodle => {
-                    let mut decompressed = vec![0; self.uncompressed as usize];
-                    for (decomp_chunk, comp_range) in decompressed
-                        .chunks_mut(self.compression_block_size as usize)
-                        .zip(ranges)
-                    {
-                        let out =
-                            oodle_loader::oodle()?.decompress(&data[comp_range], decomp_chunk);
-                        if out == 0 {
-                            return Err(Error::DecompressionFailed(Compression::Oodle));
+            Some(comp) => {
+                let chunk_size = if ranges.len() == 1 {
+                    self.uncompressed as usize
+                } else {
+                    self.compression_block_size as usize
+                };
+
+                match comp {
+                    Compression::Zlib => decompress!(flate2::read::ZlibDecoder<&[u8]>),
+                    Compression::Gzip => decompress!(flate2::read::GzDecoder<&[u8]>),
+                    Compression::Zstd => {
+                        for range in ranges {
+                            io::copy(&mut zstd::stream::read::Decoder::new(&data[range])?, buf)?;
                         }
                     }
-                    buf.write_all(&decompressed)?;
+                    Compression::LZ4 => {
+                        let mut decompressed = vec![0; self.uncompressed as usize];
+                        for (decomp_chunk, comp_range) in
+                            decompressed.chunks_mut(chunk_size).zip(ranges)
+                        {
+                            lz4_flex::block::decompress_into(&data[comp_range], decomp_chunk)
+                                .map_err(|_| Error::DecompressionFailed(Compression::LZ4))?;
+                        }
+                        buf.write_all(&decompressed)?;
+                    }
+                    #[cfg(feature = "oodle")]
+                    Compression::Oodle => {
+                        let mut decompressed = vec![0; self.uncompressed as usize];
+                        for (decomp_chunk, comp_range) in
+                            decompressed.chunks_mut(chunk_size).zip(ranges)
+                        {
+                            let out =
+                                oodle_loader::oodle()?.decompress(&data[comp_range], decomp_chunk);
+                            if out == 0 {
+                                return Err(Error::DecompressionFailed(Compression::Oodle));
+                            }
+                        }
+                        buf.write_all(&decompressed)?;
+                    }
+                    #[cfg(not(feature = "oodle"))]
+                    Compression::Oodle => return Err(super::Error::Oodle),
                 }
-                #[cfg(not(feature = "oodle"))]
-                Compression::Oodle => return Err(super::Error::Oodle),
-            },
+            }
         }
         buf.flush()?;
         Ok(())
