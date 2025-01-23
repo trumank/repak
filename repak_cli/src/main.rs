@@ -187,7 +187,7 @@ fn main() -> Result<(), repak::Error> {
         Action::List(action) => list(aes_key, action),
         Action::HashList(action) => hash_list(aes_key, action),
         Action::Unpack(action) => unpack(aes_key, action),
-        Action::Pack(action) => pack(action),
+        Action::Pack(action) => pack(aes_key, action),
         Action::Get(action) => get(aes_key, action),
     }
 }
@@ -449,7 +449,7 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
     Ok(())
 }
 
-fn pack(args: ActionPack) -> Result<(), repak::Error> {
+fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Error> {
     let output = args.output.map(PathBuf::from).unwrap_or_else(|| {
         // NOTE: don't use `with_extension` here because it will replace e.g. the `.1` in
         // `test_v1.1`.
@@ -478,14 +478,16 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     collect_files(&mut paths, input_path)?;
     paths.sort();
 
-    let mut pak = repak::PakBuilder::new()
-        .compression(args.compression.iter().cloned())
-        .writer(
-            BufWriter::new(File::create(&output)?),
-            args.version,
-            args.mount_point,
-            Some(args.path_hash_seed),
-        );
+    let mut builder = repak::PakBuilder::new().compression(args.compression.iter().cloned());
+    if let Some(aes_key) = aes_key {
+        builder = builder.key(aes_key);
+    }
+    let mut pak = builder.writer(
+        BufWriter::new(File::create(&output)?),
+        args.version,
+        args.mount_point,
+        Some(args.path_hash_seed),
+    );
 
     use indicatif::ProgressIterator;
 
@@ -520,7 +522,7 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
                         if args.verbose {
                             log.println(format!("packing {}", &rel));
                         }
-                        let entry = entry_builder.build_entry(true, std::fs::read(p)?)?;
+                        let entry = entry_builder.build_entry(true, std::fs::read(p)?, rel)?;
 
                         tx.send((rel.to_string(), entry)).unwrap();
                         Ok(())

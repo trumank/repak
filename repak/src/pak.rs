@@ -1,4 +1,4 @@
-use crate::data::build_partial_entry;
+use crate::data::{build_partial_entry, pad_length};
 use crate::entry::Entry;
 use crate::{Compression, Error, PartialEntry};
 
@@ -8,7 +8,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Seek, Write};
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub(crate) struct Hash(pub(crate) [u8; 20]);
 impl std::fmt::Debug for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -147,21 +147,6 @@ impl Index {
     }
 }
 
-#[cfg(feature = "encryption")]
-fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
-    if let super::Key::Some(key) = key {
-        use aes::cipher::BlockDecrypt;
-        for chunk in bytes.chunks_mut(16) {
-            chunk.chunks_mut(4).for_each(|c| c.reverse());
-            key.decrypt_block(aes::Block::from_mut_slice(chunk));
-            chunk.chunks_mut(4).for_each(|c| c.reverse());
-        }
-        Ok(())
-    } else {
-        Err(super::Error::Encrypted)
-    }
-}
-
 impl PakReader {
     fn new_any_inner<R: Read + Seek>(
         reader: &mut R,
@@ -220,29 +205,14 @@ impl PakReader {
         writer: &mut W,
     ) -> Result<(), super::Error> {
         match self.pak.index.entries().get(path) {
-            Some(entry) => {
-                let path = format!("{}/{}", self.mount_point(), path);
-
-                let mut last = false;
-                let path = path
-                    .chars()
-                    .filter(|&c| {
-                        let keep = c != '/' || !last;
-                        last = c == '/';
-                        keep
-                    })
-                    .collect::<String>();
-                let path = path.strip_prefix("../../../").unwrap();
-
-                entry.read_file(
-                    reader,
-                    self.pak.version,
-                    &self.pak.compression,
-                    &self.key,
-                    writer,
-                    path,
-                )
-            }
+            Some(entry) => entry.read_file(
+                reader,
+                self.pak.version,
+                &self.pak.compression,
+                &self.key,
+                writer,
+                &root_path(self.mount_point(), path),
+            ),
             None => Err(super::Error::MissingEntry(path.to_owned())),
         }
     }
@@ -304,6 +274,8 @@ impl<W: Write + Seek> PakWriter<W> {
                     &[]
                 },
                 data.as_ref(),
+                &self.key,
+                &root_path(&self.pak.mount_point, path),
             )?,
         );
 
@@ -313,6 +285,8 @@ impl<W: Write + Seek> PakWriter<W> {
     pub fn entry_builder(&self) -> EntryBuilder {
         EntryBuilder {
             allowed_compression: self.allowed_compression.clone(),
+            key: self.key.clone(),
+            mount_point: self.pak.mount_point.clone(),
         }
     }
 
@@ -346,6 +320,21 @@ impl<W: Write + Seek> PakWriter<W> {
     }
 }
 
+fn root_path(mount_point: &str, path: &str) -> String {
+    let path = format!("{}/{}", mount_point, path);
+
+    let mut last = false;
+    let path = path
+        .chars()
+        .filter(|&c| {
+            let keep = c != '/' || !last;
+            last = c == '/';
+            keep
+        })
+        .collect::<String>();
+    path.strip_prefix("../../../").unwrap().to_string()
+}
+
 struct Data<'d>(Box<dyn AsRef<[u8]> + Send + Sync + 'd>);
 impl AsRef<[u8]> for Data<'_> {
     fn as_ref(&self) -> &[u8] {
@@ -356,6 +345,9 @@ impl AsRef<[u8]> for Data<'_> {
 #[derive(Clone)]
 pub struct EntryBuilder {
     allowed_compression: Vec<Compression>,
+    #[allow(unused)]
+    key: super::Key,
+    mount_point: String,
 }
 impl EntryBuilder {
     /// Builds an entry in memory (compressed if requested) which must be written out later
@@ -363,11 +355,17 @@ impl EntryBuilder {
         &self,
         compress: bool,
         data: D,
+        path: &str,
     ) -> Result<PartialEntry<D>, Error> {
         let compression = compress
             .then_some(self.allowed_compression.as_slice())
             .unwrap_or_default();
-        build_partial_entry(compression, data)
+        build_partial_entry(
+            compression,
+            data,
+            &self.key,
+            &root_path(&self.mount_point, path),
+        )
     }
 }
 
@@ -390,7 +388,7 @@ impl Pak {
             #[cfg(not(feature = "encryption"))]
             return Err(super::Error::Encryption);
             #[cfg(feature = "encryption")]
-            decrypt(key, &mut index)?;
+            crate::data::decrypt(key, &mut index)?;
         }
 
         let mut index = io::Cursor::new(index);
@@ -414,7 +412,7 @@ impl Pak {
                     #[cfg(not(feature = "encryption"))]
                     return Err(super::Error::Encryption);
                     #[cfg(feature = "encryption")]
-                    decrypt(key, &mut path_hash_index_buf)?;
+                    crate::data::decrypt(key, &mut path_hash_index_buf)?;
                 }
 
                 let mut path_hash_index = vec![];
@@ -446,7 +444,7 @@ impl Pak {
                     #[cfg(not(feature = "encryption"))]
                     return Err(super::Error::Encryption);
                     #[cfg(feature = "encryption")]
-                    decrypt(key, &mut full_directory_index)?;
+                    crate::data::decrypt(key, &mut full_directory_index)?;
                 }
                 let mut fdi = io::Cursor::new(full_directory_index);
 
@@ -525,7 +523,7 @@ impl Pak {
     fn write<W: Write + Seek>(
         &self,
         writer: &mut W,
-        _key: &super::Key,
+        #[allow(unused)] key: &super::Key,
     ) -> Result<(), super::Error> {
         let index_offset = writer.stream_position()?;
 
@@ -595,6 +593,10 @@ impl Pak {
                 size += 4; // encoded entry size
                 size += encoded_entries.len() as u64;
                 size += 4; // unused file count
+                #[cfg(feature = "encryption")]
+                if let crate::Key::Some(_) = key {
+                    size = pad_length(size as usize, 16) as u64
+                }
                 size
             };
 
@@ -609,11 +611,23 @@ impl Pak {
                 &offsets,
             )?;
 
+            #[cfg(feature = "encryption")]
+            if let crate::Key::Some(key) = key {
+                crate::data::pad_zeros_to_alignment(&mut phi_buf, 16);
+                crate::data::encrypt(key, &mut phi_buf);
+            }
+
             let full_directory_index_offset = path_hash_index_offset + phi_buf.len() as u64;
 
             let mut fdi_buf = vec![];
             let mut fdi_writer = io::Cursor::new(&mut fdi_buf);
             generate_full_directory_index(&mut fdi_writer, &self.index.entries, &offsets)?;
+
+            #[cfg(feature = "encryption")]
+            if let crate::Key::Some(key) = key {
+                crate::data::pad_zeros_to_alignment(&mut fdi_buf, 16);
+                crate::data::encrypt(key, &mut fdi_buf);
+            }
 
             index_writer.write_u32::<LE>(1)?; // we have path hash index
             index_writer.write_u64::<LE>(path_hash_index_offset)?;
@@ -633,7 +647,34 @@ impl Pak {
             Some((phi_buf, fdi_buf))
         };
 
-        let index_hash = hash(&index_buf);
+        let mut footer = super::footer::Footer {
+            encryption_uuid: None,
+            encrypted: false,
+            magic: super::MAGIC,
+            version: self.version,
+            version_major: self.version.version_major(),
+            index_offset,
+            index_size: 0,
+            hash: Default::default(),
+            frozen: false,
+            compression: self.compression.clone(),
+        };
+
+        #[cfg(feature = "encryption")]
+        if let crate::Key::Some(key) = key {
+            crate::data::pad_zeros_to_alignment(&mut index_buf, 16);
+            footer.hash = hash(&index_buf);
+            crate::data::encrypt(key, &mut index_buf);
+            footer.encrypted = true;
+            footer.encryption_uuid = Some(Default::default());
+        } else {
+            footer.hash = hash(&index_buf);
+        }
+        #[cfg(not(feature = "encryption"))]
+        {
+            footer.hash = hash(&index_buf);
+        }
+        footer.index_size = index_buf.len() as u64;
 
         writer.write_all(&index_buf)?;
 
@@ -641,19 +682,6 @@ impl Pak {
             writer.write_all(&phi_buf[..])?;
             writer.write_all(&fdi_buf[..])?;
         }
-
-        let footer = super::footer::Footer {
-            encryption_uuid: None,
-            encrypted: false,
-            magic: super::MAGIC,
-            version: self.version,
-            version_major: self.version.version_major(),
-            index_offset,
-            index_size: index_buf.len() as u64,
-            hash: index_hash,
-            frozen: false,
-            compression: self.compression.clone(), // TODO: avoid this clone
-        };
 
         footer.write(writer)?;
 
@@ -748,16 +776,6 @@ fn generate_full_directory_index<W: Write>(
     }
 
     Ok(())
-}
-
-#[cfg(feature = "encryption")]
-fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
-    use aes::cipher::BlockEncrypt;
-    for chunk in bytes.chunks_mut(16) {
-        chunk.chunks_mut(4).for_each(|c| c.reverse());
-        key.encrypt_block(aes::Block::from_mut_slice(chunk));
-        chunk.chunks_mut(4).for_each(|c| c.reverse());
-    }
 }
 
 #[cfg(test)]

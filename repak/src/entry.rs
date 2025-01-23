@@ -43,21 +43,6 @@ fn compression_index_size(version: Version) -> CompressionIndexSize {
     }
 }
 
-fn get_limit(path: &str) -> usize {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&[0x11, 0x22, 0x33, 0x44]);
-    hasher.update(path.to_ascii_lowercase().as_bytes());
-    let limit =
-        ((u64::from_le_bytes(hasher.finalize().as_bytes()[0..8].try_into().unwrap()) % 0x3d) * 63
-            + 319)
-            & 0xffffffffffffffc0;
-    if limit == 0 {
-        0x1000
-    } else {
-        limit as usize
-    }
-}
-
 enum CompressionIndexSize {
     U8,
     U32,
@@ -119,8 +104,10 @@ impl Entry {
         compression_slots: &mut Vec<Option<Compression>>,
         allowed_compression: &[Compression],
         data: &[u8],
+        #[allow(unused)] key: &super::Key,
+        path: &str,
     ) -> Result<Self, Error> {
-        let partial_entry = build_partial_entry(allowed_compression, data)?;
+        let partial_entry = build_partial_entry(allowed_compression, data, key, path)?;
         let stream_position = writer.stream_position()?;
         let entry = partial_entry.build_entry(version, compression_slots, stream_position)?;
         entry.write(writer, version, crate::entry::EntryLocation::Data)?;
@@ -363,22 +350,14 @@ impl Entry {
             false => self.compressed,
         } as usize)?;
 
-        let limit = get_limit(path).min(data.len());
+        let limit = crate::data::get_limit(path).min(data.len());
 
         if self.is_encrypted() {
             #[cfg(not(feature = "encryption"))]
             return Err(super::Error::Encryption);
             #[cfg(feature = "encryption")]
             {
-                let super::Key::Some(key) = key else {
-                    return Err(super::Error::Encrypted);
-                };
-                use aes::cipher::BlockDecrypt;
-                for block in data[..limit].chunks_mut(16) {
-                    block.chunks_mut(4).for_each(|c| c.reverse());
-                    key.decrypt_block(aes::Block::from_mut_slice(block));
-                    block.chunks_mut(4).for_each(|c| c.reverse());
-                }
+                crate::data::decrypt(key, &mut data[..limit])?;
                 data.truncate(self.compressed as usize);
             }
         }
@@ -462,6 +441,23 @@ impl Entry {
         }
         buf.flush()?;
         Ok(())
+    }
+}
+
+struct Cap<S> {
+    s: S,
+    buf: Vec<u8>,
+}
+impl<S> Cap<S> {
+    fn new(s: S) -> Self {
+        Self { s, buf: vec![] }
+    }
+}
+impl<S: std::io::Read> std::io::Read for Cap<S> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.s.read(buf).inspect(|len| {
+            self.buf.extend_from_slice(&buf[..*len]);
+        })
     }
 }
 
