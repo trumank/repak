@@ -84,13 +84,13 @@ struct ActionPack {
     #[arg(short, long, default_value = "../../../")]
     mount_point: String,
 
-    ///// Version
-    //#[arg(
-    //    long,
-    //    default_value_t = repak::Version::V8B,
-    //    value_parser = clap::builder::PossibleValuesParser::new(repak::Version::VARIANTS).map(|s| s.parse::<repak::Version>().unwrap())
-    //)]
-    //version: repak::Version,
+    /// Version
+    #[arg(
+        long,
+        default_value_t = repak::Version::V8B,
+        value_parser = clap::builder::PossibleValuesParser::new(repak::Version::VARIANTS).map(|s| s.parse::<repak::Version>().unwrap())
+    )]
+    version: repak::Version,
 
     /// Compression
     #[arg(
@@ -484,7 +484,7 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
     }
     let mut pak = builder.writer(
         BufWriter::new(File::create(&output)?),
-        repak::Version::V8B,
+        args.version,
         args.mount_point,
         Some(args.path_hash_seed),
     );

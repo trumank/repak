@@ -612,8 +612,12 @@ impl Pak {
             )?;
 
             #[cfg(feature = "encryption")]
-            if let crate::Key::Some(key) = key {
+            if let crate::Key::Some(_) = key {
                 crate::data::pad_zeros_to_alignment(&mut phi_buf, 16);
+            }
+            let phi_hash = hash(&phi_buf);
+            #[cfg(feature = "encryption")]
+            if let crate::Key::Some(key) = key {
                 crate::data::encrypt(key, &mut phi_buf);
             }
 
@@ -624,20 +628,24 @@ impl Pak {
             generate_full_directory_index(&mut fdi_writer, &self.index.entries, &offsets)?;
 
             #[cfg(feature = "encryption")]
-            if let crate::Key::Some(key) = key {
+            if let crate::Key::Some(_) = key {
                 crate::data::pad_zeros_to_alignment(&mut fdi_buf, 16);
+            }
+            let fdi_hash = hash(&fdi_buf);
+            #[cfg(feature = "encryption")]
+            if let crate::Key::Some(key) = key {
                 crate::data::encrypt(key, &mut fdi_buf);
             }
 
             index_writer.write_u32::<LE>(1)?; // we have path hash index
             index_writer.write_u64::<LE>(path_hash_index_offset)?;
             index_writer.write_u64::<LE>(phi_buf.len() as u64)?; // path hash index size
-            index_writer.write_all(&hash(&phi_buf).0)?;
+            index_writer.write_all(&phi_hash.0)?;
 
             index_writer.write_u32::<LE>(1)?; // we have full directory index
             index_writer.write_u64::<LE>(full_directory_index_offset)?;
             index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // path hash index size
-            index_writer.write_all(&hash(&fdi_buf).0)?;
+            index_writer.write_all(&fdi_hash.0)?;
 
             index_writer.write_u32::<LE>(encoded_entries.len() as u32)?;
             index_writer.write_all(&encoded_entries)?;
