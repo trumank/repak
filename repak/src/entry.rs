@@ -282,6 +282,11 @@ impl Entry {
         let is_uncompressed_size_32_bit_safe = self.uncompressed <= u32::MAX as u64;
         let is_offset_32_bit_safe = self.offset <= u32::MAX as u64;
 
+        assert!(
+            compression_blocks_count < 0x10_000,
+            "compression blocks count fits in 16 bits"
+        );
+
         let flags = (compression_block_size)
             | (compression_blocks_count << 6)
             | ((self.is_encrypted() as u32) << 22)

@@ -153,7 +153,7 @@ where
         Some(compression) => {
             // https://github.com/EpicGames/UnrealEngine/commit/3aad0ff7976be1073005dca2c1282af548b45d89
             // Block size must fit into flags field or it may cause unreadable paks for earlier Unreal Engine versions
-            compression_block_size = 0x10000;
+            compression_block_size = 0x3e << 11; // max possible block size
             let mut compressed_size = 0;
             let mut blocks = vec![];
             for chunk in data.as_ref().chunks(compression_block_size as usize) {
