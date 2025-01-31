@@ -90,6 +90,8 @@ mod oodle_lz {
 
     pub type GetCompressedBufferSizeNeeded =
         unsafe extern "system" fn(compressor: Compressor, rawSize: usize) -> usize;
+
+    pub type SetPrintf = unsafe extern "system" fn(printf: *const ());
 }
 
 static OODLE_VERSION: &str = "2.9.10";
@@ -187,8 +189,23 @@ pub struct Oodle {
     compress: oodle_lz::Compress,
     decompress: oodle_lz::Decompress,
     get_compressed_buffer_size_needed: oodle_lz::GetCompressedBufferSizeNeeded,
+    set_printf: oodle_lz::SetPrintf,
 }
 impl Oodle {
+    fn new(lib: libloading::Library) -> Result<Self> {
+        unsafe {
+            let res = Oodle {
+                compress: *lib.get(b"OodleLZ_Compress")?,
+                decompress: *lib.get(b"OodleLZ_Decompress")?,
+                get_compressed_buffer_size_needed: *lib
+                    .get(b"OodleLZ_GetCompressedBufferSizeNeeded")?,
+                set_printf: *lib.get(b"OodleCore_Plugins_SetPrintf")?,
+                _library: lib,
+            };
+            (res.set_printf)(std::ptr::null()); // silence oodle logging
+            Ok(res)
+        }
+    }
     pub fn compress(
         &self,
         input: &[u8],
@@ -255,14 +272,7 @@ fn load_oodle() -> Result<Oodle> {
     let path = fetch_oodle()?;
     unsafe {
         let library = libloading::Library::new(path)?;
-
-        Ok(Oodle {
-            compress: *library.get(b"OodleLZ_Compress")?,
-            decompress: *library.get(b"OodleLZ_Decompress")?,
-            get_compressed_buffer_size_needed: *library
-                .get(b"OodleLZ_GetCompressedBufferSizeNeeded")?,
-            _library: library,
-        })
+        Oodle::new(library)
     }
 }
 
