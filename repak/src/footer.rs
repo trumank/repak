@@ -98,7 +98,7 @@ impl Footer {
         let algo_size = match self.version {
             ver if ver < Version::V8A => 0,
             ver if ver < Version::V8B => 4,
-            _ => 5,
+            _ => 4,
         };
         // TODO: handle if compression.len() > algo_size
         for i in 0..algo_size {
