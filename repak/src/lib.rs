@@ -115,8 +115,7 @@ impl Version {
             Version::V8B => VersionMajor::FNameBasedCompression,
             Version::V9 => VersionMajor::FrozenIndex,
             Version::V10 => VersionMajor::PathHashIndex,
-            Version::V11 => VersionMajor::Fnv64BugFix,
-            _ => unreachable!(),
+            Version::PADDING | Version::V11 => VersionMajor::Fnv64BugFix,
         }
     }
 }
