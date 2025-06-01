@@ -403,7 +403,7 @@ impl Pak {
                 let mut phi_reader = io::Cursor::new(&mut path_hash_index_buf);
                 for _ in 0..phi_reader.read_u32::<LE>()? {
                     let hash = phi_reader.read_u64::<LE>()?;
-                    let encoded_entry_offset = phi_reader.read_u32::<LE>()?;
+                    let encoded_entry_offset = phi_reader.read_i32::<LE>()?;
                     path_hash_index.push((hash, encoded_entry_offset));
                 }
 
@@ -440,7 +440,7 @@ impl Pak {
                     let mut files = BTreeMap::new();
                     for _ in 0..file_count {
                         let file_name = fdi.read_string()?;
-                        files.insert(file_name, fdi.read_u32::<LE>()?);
+                        files.insert(file_name, fdi.read_i32::<LE>()?);
                     }
                     directories.insert(dir_name, files);
                 }
@@ -451,18 +451,24 @@ impl Pak {
             let size = index.read_u32::<LE>()? as usize;
             let encoded_entries = index.read_len(size)?;
 
+            let non_encoded_entry_count = index.read_u32::<LE>()? as usize;
+            let mut non_encoded_entries = Vec::with_capacity(non_encoded_entry_count);
+            for _ in 0..non_encoded_entry_count {
+                non_encoded_entries.push(Entry::read(&mut index, version)?);
+            }
+
             let mut entries_by_path = BTreeMap::new();
             if let Some(fdi) = &full_directory_index {
                 let mut encoded_entries = io::Cursor::new(&encoded_entries);
                 for (dir_name, dir) in fdi {
                     for (file_name, encoded_offset) in dir {
-                        if *encoded_offset == 0x80000000 {
-                            println!("{file_name:?} has invalid offset: 0x{encoded_offset:08x}");
-                            continue;
-                        }
-                        encoded_entries.seek(io::SeekFrom::Start(*encoded_offset as u64))?;
-                        let entry =
-                            super::entry::Entry::read_encoded(&mut encoded_entries, version)?;
+                        let entry = if *encoded_offset >= 0 {
+                            encoded_entries.set_position(*encoded_offset as u64);
+                            Entry::read_encoded(&mut encoded_entries, version)?
+                        } else {
+                            let index = (-*encoded_offset) as usize - 1;
+                            non_encoded_entries[index].clone()
+                        };
                         let path = format!(
                             "{}{}",
                             dir_name.strip_prefix('/').unwrap_or(dir_name),
@@ -472,8 +478,6 @@ impl Pak {
                     }
                 }
             }
-
-            assert_eq!(index.read_u32::<LE>()?, 0, "remaining index bytes are 0"); // TODO possibly remaining unencoded entries?
 
             Index {
                 path_hash_seed: Some(path_hash_seed),
