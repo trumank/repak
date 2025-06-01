@@ -97,7 +97,7 @@ impl<W: std::io::Write> WriteExt for W {
     }
     fn write_string(&mut self, value: &str) -> Result<(), super::Error> {
         if value.is_empty() || value.is_ascii() {
-            self.write_u32::<LE>(value.as_bytes().len() as u32 + 1)?;
+            self.write_u32::<LE>(value.len() as u32 + 1)?;
             self.write_all(value.as_bytes())?;
             self.write_u8(0)?;
         } else {
