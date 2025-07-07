@@ -9,7 +9,7 @@ Library and CLI tool for working with Unreal Engine .pak files.
 
 `repak` CLI
  - Sane handling of mount points: defaults to `../../../` but can be configured via flag
- - 2x faster unpacking over `UnrealPak`. As much as 30x faster has been observed (on Linux unpacked to ramdisk)
+ - 2x faster unpacking over `UnrealPak`
  - Unpacking is guarded against malicious pak that attempt to write to parent directories
 
 ## cli
