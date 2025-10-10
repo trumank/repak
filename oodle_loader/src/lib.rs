@@ -103,11 +103,25 @@ struct OodlePlatform {
     hash: &'static str,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
     path: "linux/lib",
     name: "liboo2corelinux64.so.9",
     hash: "ed7e98f70be1254a80644efd3ae442ff61f854a2fe9debb0b978b95289884e9c",
+};
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
+    path: "linuxarm/lib",
+    name: "liboo2corelinuxarm64.so.9",
+    hash: "161a8ecca8cc2d4ea6469779c2cc529ed5bb2765d99466273c29fdbef4657374",
+};
+
+#[cfg(all(target_os = "linux", target_arch = "arm"))]
+static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
+    path: "linuxarm/lib",
+    name: "liboo2corelinuxarm32.so.9",
+    hash: "83cda016c033844fe650e49fac4cc19ff0a0fb4a3c9a7576a320ea39a9e4626b",
 };
 
 #[cfg(target_os = "macos")]
