@@ -69,10 +69,19 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
         file_offset: u64,
     ) -> Result<Entry> {
         #[cfg(feature = "compression")]
-        let compression_slot = self
-            .compression
-            .map(|c| get_compression_slot(version, compression_slots, c))
-            .transpose()?;
+        let compression_slot = {
+            let empty = match &self.data {
+                PartialEntryData::Slice(s) => s.as_ref().is_empty(),
+                PartialEntryData::Blocks(blocks) => blocks.is_empty(),
+            };
+            if empty {
+                None
+            } else {
+                self.compression
+                    .map(|c| get_compression_slot(version, compression_slots, c))
+                    .transpose()?
+            }
+        };
         #[cfg(not(feature = "compression"))]
         let compression_slot = None;
 
