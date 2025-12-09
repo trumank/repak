@@ -201,6 +201,10 @@ impl PakReader {
         self.pak.encryption_guid
     }
 
+    pub fn compression(&self) -> Option<&Compression> {
+        self.pak.compression.first().and_then(|c| c.as_ref())
+    }
+
     pub fn path_hash_seed(&self) -> Option<u64> {
         self.pak.index.path_hash_seed
     }
