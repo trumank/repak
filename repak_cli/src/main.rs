@@ -199,7 +199,10 @@ fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::E
     println!("version: {}", pak.version());
     println!("version major: {}", pak.version().version_major());
     println!("encrypted index: {}", pak.encrypted_index());
-    println!("encrytion guid: {:032X?}", pak.encryption_guid());
+    println!("encryption guid: {:032X?}", pak.encryption_guid());
+    if let Some(c) = pak.compression() {
+        println!("compression: {}", c);
+    }
     println!("path hash seed: {:08X?}", pak.path_hash_seed());
     println!("{} file entries", pak.files().len());
     Ok(())
