@@ -17,6 +17,7 @@ fn test_cli_info() {
         version major: Fnv64BugFix
         encrypted index: false
         encrytion guid: Some(00000000000000000000000000000000)
+        compression: None
         path hash seed: Some(205C5A7D)
         4 file entries
     "});

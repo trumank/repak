@@ -233,6 +233,23 @@ impl PakReader {
         self.pak.index.entries().keys().cloned().collect()
     }
 
+    pub fn used_compression(&self) -> Vec<Compression> {
+        let mut used_compression = vec![0; self.pak.compression.len()];
+        for entry in self.pak.index.entries.values() {
+            if let Some(count) = entry
+                .compression_slot
+                .and_then(|slot| used_compression.get_mut(slot as usize))
+            {
+                *count += 1;
+            }
+        }
+        used_compression
+            .into_iter()
+            .zip(self.pak.compression.iter())
+            .filter_map(|(count, comp)| comp.filter(|_| count > 0))
+            .collect()
+    }
+
     pub fn into_pakwriter<W: Write + Seek>(
         self,
         mut writer: W,

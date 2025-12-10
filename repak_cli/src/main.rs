@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use clap::builder::TypedValueParser;
 use clap::{Parser, Subcommand};
+use itertools::Itertools;
 use path_clean::PathClean;
 use path_slash::PathExt;
 use rayon::prelude::*;
@@ -200,6 +201,12 @@ fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::E
     println!("version major: {}", pak.version().version_major());
     println!("encrypted index: {}", pak.encrypted_index());
     println!("encrytion guid: {:032X?}", pak.encryption_guid());
+    let compression = pak.used_compression();
+    if compression.is_empty() {
+        println!("compression: None");
+    } else {
+        println!("compression: {}", compression.iter().join(" ,"));
+    }
     println!("path hash seed: {:08X?}", pak.path_hash_seed());
     println!("{} file entries", pak.files().len());
     Ok(())
