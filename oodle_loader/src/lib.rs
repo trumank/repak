@@ -1,4 +1,4 @@
-use std::{io::Read, sync::OnceLock};
+use std::sync::OnceLock;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -188,11 +188,7 @@ fn check_hash(buffer: &[u8]) -> Result<()> {
 fn fetch_oodle() -> Result<std::path::PathBuf> {
     let oodle_path = std::env::current_exe()?.with_file_name(OODLE_PLATFORM.name);
     if !oodle_path.exists() {
-        let mut buffer = vec![];
-        ureq::get(&url())
-            .call()?
-            .into_reader()
-            .read_to_end(&mut buffer)?;
+        let buffer = ureq::get(&url()).call()?.into_body().read_to_vec()?;
         check_hash(&buffer)?;
         std::fs::write(&oodle_path, buffer)?;
     }

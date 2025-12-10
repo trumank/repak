@@ -1,16 +1,11 @@
-use assert_cmd::prelude::*;
+use assert_cmd::cargo::cargo_bin_cmd;
 use indoc::{formatdoc, indoc};
-use std::process::Command;
 
 const PAK: &str = "../repak/tests/packs/pack_v11.pak";
 
 #[test]
 fn test_cli_info() {
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
-        .arg("info")
-        .arg(PAK)
-        .assert();
+    let assert = cargo_bin_cmd!("repak").arg("info").arg(PAK).assert();
     assert.success().stdout(indoc! {"
         mount point: ../mount/point/root/
         version: V11
@@ -25,8 +20,7 @@ fn test_cli_info() {
 
 #[test]
 fn test_cli_list() {
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("list")
         .arg("-s")
         .arg("")
@@ -39,8 +33,7 @@ fn test_cli_list() {
         ../mount/point/root/zeros.bin
     "#});
 
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("list")
         .arg("-s")
         .arg("../mount")
@@ -53,8 +46,7 @@ fn test_cli_list() {
         point/root/zeros.bin
     "#});
 
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("list")
         .arg("-s")
         .arg("../mount/root/asdf")
@@ -67,8 +59,7 @@ fn test_cli_list() {
 
 #[test]
 fn test_cli_get() {
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("get")
         .arg("-s")
         .arg("../mount/point")
@@ -79,8 +70,7 @@ fn test_cli_get() {
         Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
     "#});
 
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("get")
         .arg("-s")
         .arg("../mount/point")
@@ -99,8 +89,7 @@ fn test_cli_pack() {
     let out_pak = dir.path().join("output.pak");
     let out_dir = dir.path().join("output");
 
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("pack")
         .arg("../repak/tests/pack/")
         .arg("-m")
@@ -115,8 +104,7 @@ fn test_cli_pack() {
 
     // TODO test packing to non-empty file
 
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("unpack")
         .arg(&out_pak)
         .arg("-s")
@@ -132,8 +120,7 @@ fn test_cli_pack() {
 fn test_cli_unpack() {
     let dir = tempfile::tempdir().unwrap();
 
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("unpack")
         .arg(PAK)
         .arg("-s")
@@ -153,8 +140,7 @@ fn test_cli_unpack() {
 fn test_cli_unpack_include() {
     let dir = tempfile::tempdir().unwrap();
 
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("unpack")
         .arg(PAK)
         .arg("-s")
@@ -171,8 +157,7 @@ fn test_cli_unpack_include() {
 
 #[test]
 fn test_cli_hashlist() {
-    let assert = Command::cargo_bin("repak")
-        .unwrap()
+    let assert = cargo_bin_cmd!("repak")
         .arg("hash-list")
         .arg(PAK)
         .arg("-s")

@@ -12,10 +12,9 @@ fn workspace_dir() -> std::path::PathBuf {
 
 #[test]
 fn test_readme_help() {
-    use assert_cmd::prelude::*;
-    use std::process::Command;
+    use assert_cmd::cargo::cargo_bin_cmd;
 
-    let err = Command::cargo_bin("repak").unwrap().unwrap_err();
+    let err = cargo_bin_cmd!("repak").unwrap_err();
     let help = std::str::from_utf8(&err.as_output().unwrap().stderr).unwrap();
 
     let readme = std::fs::read_to_string(workspace_dir().join("README.md")).unwrap();
