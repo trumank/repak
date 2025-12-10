@@ -58,6 +58,7 @@ mod oodle_lz {
         HyperFast4 = -4,
     }
 
+    #[allow(non_snake_case)]
     pub type Compress = unsafe extern "system" fn(
         compressor: Compressor,
         rawBuf: *const u8,
@@ -71,6 +72,7 @@ mod oodle_lz {
         scratchSize: usize,
     ) -> isize;
 
+    #[allow(non_snake_case)]
     pub type Decompress = unsafe extern "system" fn(
         compBuf: *const u8,
         compBufSize: usize,
@@ -88,6 +90,7 @@ mod oodle_lz {
         threadPhase: u32,
     ) -> isize;
 
+    #[allow(non_snake_case)]
     pub type GetCompressedBufferSizeNeeded =
         unsafe extern "system" fn(compressor: Compressor, rawSize: usize) -> usize;
 
