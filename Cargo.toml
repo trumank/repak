@@ -6,7 +6,7 @@ members = ["repak", "repak_cli"]
 repository = "https://github.com/trumank/repak"
 authors = ["spuds", "trumank"]
 license = "MIT OR Apache-2.0"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 keywords = ["unreal-engine", "pak", "unrealpak"]
 
