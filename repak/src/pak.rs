@@ -40,9 +40,9 @@ impl PakBuilder {
         self.key = super::Key::Some(key);
         self
     }
-    /// Use Denuvo custom cipher for decryption
-    pub fn denuvo(mut self) -> Self {
-        self.key = super::Key::Denuvo(super::DenuvoCipher::new());
+    /// Use FallenDoll custom cipher for decryption
+    pub fn fallendoll(mut self) -> Self {
+        self.key = super::Key::FallenDoll(super::FallenDollCipher::new());
         self
     }
     #[cfg(feature = "compression")]
@@ -162,8 +162,8 @@ fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
             }
             Ok(())
         }
-        super::Key::Denuvo(denuvo_cipher) => {
-            denuvo_cipher.decrypt(bytes);
+        super::Key::FallenDoll(fallendoll_cipher) => {
+            fallendoll_cipher.decrypt(bytes);
             Ok(())
         }
         super::Key::None => Err(super::Error::Encrypted),
@@ -182,8 +182,8 @@ fn encrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
             }
             Ok(())
         }
-        super::Key::Denuvo(denuvo_cipher) => {
-            denuvo_cipher.encrypt(bytes);
+        super::Key::FallenDoll(fallendoll_cipher) => {
+            fallendoll_cipher.encrypt(bytes);
             Ok(())
         }
         super::Key::None => Ok(()),
@@ -355,7 +355,7 @@ impl<W: Write + Seek> PakWriter<W> {
         let stream_position = self.writer.stream_position()?;
 
         // Check if file entry encryption is required
-        // VDenuvo only encrypts the index, not file data
+        // VFallenDoll only encrypts the index, not file data
         let should_encrypt = self.pak.version.requires_file_encryption();
 
         let entry = partial_entry.build_entry(
@@ -698,7 +698,7 @@ impl Pak {
 
             // Pad buffers for encryption BEFORE hashing
             // UE5's DecryptAndValidateIndex hashes the full decrypted buffer including padding
-            let encrypted = matches!(key, super::Key::Some(_) | super::Key::Denuvo(_));
+            let encrypted = matches!(key, super::Key::Some(_) | super::Key::FallenDoll(_));
             if encrypted {
                 let phi_pad = (16 - (phi_buf.len() % 16)) % 16;
                 phi_buf.resize(phi_buf.len() + phi_pad, 0);
@@ -756,7 +756,7 @@ impl Pak {
         eprintln!("DEBUG: index_buf hex (first 64 bytes): {}", hex::encode(&index_buf[..index_buf.len().min(64)]));
 
         // Encrypt index if key provided
-        let encrypted = matches!(key, super::Key::Some(_) | super::Key::Denuvo(_));
+        let encrypted = matches!(key, super::Key::Some(_) | super::Key::FallenDoll(_));
         if encrypted {
             // Pad to 16-byte boundary for encryption
             // UE5's DecryptAndValidateIndex hashes the full decrypted buffer including padding

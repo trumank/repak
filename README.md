@@ -12,29 +12,29 @@ Library and CLI tool for working with Unreal Engine .pak files.
  - 2x faster unpacking over `UnrealPak`
  - Unpacking is guarded against malicious pak that attempt to write to parent directories
 
-## 🔐 VDenuvo Support (This Fork)
+## 🔐 VFallenDoll Support (This Fork)
 
-This fork adds **full read/write support for VDenuvo encryption** - a custom AES-256 variant used in UE5 games with Denuvo anti-tamper.
+This fork adds **full read/write support for VFallenDoll encryption** - a custom AES-256 variant used in UE5 games with FallenDoll anti-tamper.
 
 **Key Features:**
 - ✅ Custom 14-round block cipher with non-standard S-boxes
 - ✅ Index-only encryption (file data unencrypted)
-- ✅ Simple `--denuvo` CLI flag for all operations
+- ✅ Simple `--fallendoll` CLI flag for all operations
 - ✅ Verified working in-game (Operation Lovecraft: Fallen Doll - UE 5.5)
 
 **Quick Usage:**
 ```bash
-# Extract VDenuvo PAK
-repak --denuvo unpack Pak1.pak output_dir
+# Extract VFallenDoll PAK
+repak --fallendoll unpack Pak1.pak output_dir
 
-# Repack with VDenuvo encryption
-repak pack --version VDenuvo --compression Zlib \
+# Repack with VFallenDoll encryption
+repak pack --version VFallenDoll --compression Zlib \
   --mount-point "../../../Game/" \
   --path-hash-seed 123456789 \
   input_dir Pak1_repacked.pak
 ```
 
-**📖 Full Documentation:** See [`README_VDENUVO.md`](README_VDENUVO.md) for complete usage guide, troubleshooting, and technical details.
+**📖 Full Documentation:** See [`README_FALLENDOLL.md`](README_FALLENDOLL.md) for complete usage guide, troubleshooting, and technical details.
 
 ## cli
 ```console

@@ -1,11 +1,11 @@
-# VDenuvo Repak Fixes Applied
+# VFallenDoll Repak Fixes Applied
 
 ## Issue: Game crashes with "Corrupt pak index detected"
 
 ### Root Causes Found & Fixed
 
 #### 1. **Per-Block Encryption** ✅ FIXED
-**Problem**: Original implementation encrypted all data as one blob, but VDenuvo requires each compression block to be individually padded and encrypted.
+**Problem**: Original implementation encrypted all data as one blob, but VFallenDoll requires each compression block to be individually padded and encrypted.
 
 **Fix**: Modified `write_encrypted_data()` to encrypt each block separately with 16-byte padding between blocks.
 
@@ -292,7 +292,7 @@ All root causes have been identified and fixed:
 - `repak/src/data.rs` - Per-block encryption, dynamic block size, compression level
 - `repak/src/pak.rs` - Per-block writing logic, padding calculation, **hash calculation order fix**
 - `repak/src/entry.rs` - Removed debug output (cleanup)
-- `repak_cli/src/main.rs` - **Fixed file write order** (collect → sort → write instead of parallel race condition), added --denuvo CLI flag
+- `repak_cli/src/main.rs` - **Fixed file write order** (collect → sort → write instead of parallel race condition), added --fallendoll CLI flag
 - `FPakFile.cpp` - UE5 source reference for understanding DecryptAndValidateIndex validation logic
 
 ### Commands for Repacking
@@ -301,7 +301,7 @@ All root causes have been identified and fixed:
 ```bash
 cd pak2_clean/Paralogue/Config
 ../../../target/release/repak.exe pack \
-  --version VDenuvo \
+  --version VFallenDoll \
   --compression Zlib \
   --mount-point "../../../Paralogue/Config/" \
   --path-hash-seed 1015540191 \
@@ -312,7 +312,7 @@ cd pak2_clean/Paralogue/Config
 ```bash
 cd pak5_clean/Paralogue
 ../../target/release/repak.exe pack \
-  --version VDenuvo \
+  --version VFallenDoll \
   --compression Zlib \
   --mount-point "../../../Paralogue/" \
   --path-hash-seed 3720703820 \

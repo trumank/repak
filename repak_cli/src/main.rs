@@ -151,9 +151,9 @@ struct Args {
     #[arg(short, long)]
     aes_key: Option<AesKey>,
 
-    /// Use Denuvo custom cipher for encryption/decryption (overrides --aes-key)
+    /// Use FallenDoll custom cipher for encryption/decryption (overrides --aes-key)
     #[arg(short, long, default_value_t = false)]
-    denuvo: bool,
+    fallendoll: bool,
 
     #[command(subcommand)]
     action: Action,
@@ -182,16 +182,16 @@ impl std::str::FromStr for AesKey {
 
 enum EncryptionKey {
     Aes(aes::Aes256),
-    Denuvo,
+    FallenDoll,
     None,
 }
 
 fn main() -> Result<(), repak::Error> {
     let args = Args::parse();
-    
-    // Denuvo flag takes priority over AES key
-    let key = if args.denuvo {
-        EncryptionKey::Denuvo
+
+    // FallenDoll flag takes priority over AES key
+    let key = if args.fallendoll {
+        EncryptionKey::FallenDoll
     } else if let Some(aes_key) = args.aes_key {
         EncryptionKey::Aes(aes_key.0)
     } else {
@@ -212,7 +212,7 @@ fn info(key: EncryptionKey, action: ActionInfo) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
     match key {
         EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
-        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::FallenDoll => builder = builder.fallendoll(),
         EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
@@ -236,7 +236,7 @@ fn list(key: EncryptionKey, action: ActionList) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
     match key {
         EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
-        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::FallenDoll => builder = builder.fallendoll(),
         EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
@@ -271,7 +271,7 @@ fn hash_list(key: EncryptionKey, action: ActionHashList) -> Result<(), repak::Er
     let mut builder = repak::PakBuilder::new();
     match key {
         EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
-        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::FallenDoll => builder = builder.fallendoll(),
         EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut BufReader::new(File::open(&action.input)?))?;
@@ -346,7 +346,7 @@ fn unpack(key: EncryptionKey, action: ActionUnpack) -> Result<(), repak::Error> 
         let mut builder = repak::PakBuilder::new();
         match &key {
             EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key.clone()),
-            EncryptionKey::Denuvo => builder = builder.denuvo(),
+            EncryptionKey::FallenDoll => builder = builder.fallendoll(),
             EncryptionKey::None => {}
         }
         let pak = builder.reader(&mut BufReader::new(File::open(input)?))?;
@@ -508,9 +508,9 @@ fn pack(key: EncryptionKey, args: ActionPack) -> Result<(), repak::Error> {
     collect_files(&mut paths, input_path)?;
     paths.sort();
 
-    // Force Denuvo key if VDenuvo version is used, otherwise use provided key
-    let key = if args.version == repak::Version::VDenuvo {
-        EncryptionKey::Denuvo
+    // Force FallenDoll key if VFallenDoll version is used, otherwise use provided key
+    let key = if args.version == repak::Version::VFallenDoll {
+        EncryptionKey::FallenDoll
     } else {
         key
     };
@@ -518,7 +518,7 @@ fn pack(key: EncryptionKey, args: ActionPack) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
     match key {
         EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
-        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::FallenDoll => builder = builder.fallendoll(),
         EncryptionKey::None => {}
     }
     let mut pak = builder
@@ -591,7 +591,7 @@ fn get(key: EncryptionKey, args: ActionGet) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
     match key {
         EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
-        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::FallenDoll => builder = builder.fallendoll(),
         EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut reader)?;

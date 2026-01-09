@@ -375,8 +375,8 @@ impl Entry {
                         aes_key.decrypt_block(aes::Block::from_mut_slice(block))
                     }
                 }
-                super::Key::Denuvo(denuvo_cipher) => {
-                    denuvo_cipher.decrypt(&mut data);
+                super::Key::FallenDoll(fallendoll_cipher) => {
+                    fallendoll_cipher.decrypt(&mut data);
                 }
                 super::Key::None => {
                     return Err(super::Error::Encrypted);

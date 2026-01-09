@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 mod data;
-mod denuvo;
+mod fallendoll;
 mod entry;
 mod error;
 mod ext;
 mod footer;
 mod pak;
 
-pub use denuvo::DenuvoCipher;
+pub use fallendoll::FallenDollCipher;
 pub use {data::PartialEntry, error::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
@@ -39,7 +39,7 @@ pub enum Version {
     V9,
     V10,
     V11,
-    VDenuvo, // V11 + mandatory Denuvo encryption
+    VFallenDoll, // V11 + mandatory FallenDoll encryption
 }
 
 #[repr(u32)]
@@ -110,19 +110,19 @@ impl Version {
             Version::V9 => VersionMajor::FrozenIndex,
             Version::V10 => VersionMajor::PathHashIndex,
             Version::V11 => VersionMajor::Fnv64BugFix,
-            Version::VDenuvo => VersionMajor::Fnv64BugFix, // Same as V11
+            Version::VFallenDoll => VersionMajor::Fnv64BugFix, // Same as V11
         }
     }
 
-    /// Check if this version is VDenuvo
-    pub fn is_denuvo(&self) -> bool {
-        matches!(self, Version::VDenuvo)
+    /// Check if this version is VFallenDoll
+    pub fn is_fallendoll(&self) -> bool {
+        matches!(self, Version::VFallenDoll)
     }
 
     /// Check if file entries must be encrypted for this version
-    /// VDenuvo encrypts INDEX only, not file data
+    /// VFallenDoll encrypts INDEX only, not file data
     pub fn requires_file_encryption(&self) -> bool {
-        false  // VDenuvo only encrypts the index, not file data
+        false  // VFallenDoll only encrypts the index, not file data
     }
 }
 
@@ -142,8 +142,8 @@ pub enum Compression {
 pub(crate) enum Key {
     #[cfg(feature = "encryption")]
     Some(aes::Aes256),
-    /// Denuvo custom cipher (always available)
-    Denuvo(DenuvoCipher),
+    /// FallenDoll custom cipher (always available)
+    FallenDoll(FallenDollCipher),
     #[default]
     None,
 }
@@ -155,8 +155,8 @@ impl From<aes::Aes256> for Key {
     }
 }
 
-impl From<DenuvoCipher> for Key {
-    fn from(value: DenuvoCipher) -> Self {
-        Self::Denuvo(value)
+impl From<FallenDollCipher> for Key {
+    fn from(value: FallenDollCipher) -> Self {
+        Self::FallenDoll(value)
     }
 }
