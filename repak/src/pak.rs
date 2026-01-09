@@ -40,6 +40,11 @@ impl PakBuilder {
         self.key = super::Key::Some(key);
         self
     }
+    /// Use Denuvo custom cipher for decryption
+    pub fn denuvo(mut self) -> Self {
+        self.key = super::Key::Denuvo(super::DenuvoCipher::new());
+        self
+    }
     #[cfg(feature = "compression")]
     pub fn compression(mut self, compression: impl IntoIterator<Item = Compression>) -> Self {
         self.allowed_compression = compression.into_iter().collect();
@@ -147,16 +152,43 @@ impl Index {
     }
 }
 
-#[cfg(feature = "encryption")]
 fn decrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
-    if let super::Key::Some(key) = key {
-        use aes::cipher::BlockDecrypt;
-        for chunk in bytes.chunks_mut(16) {
-            key.decrypt_block(aes::Block::from_mut_slice(chunk))
+    match key {
+        #[cfg(feature = "encryption")]
+        super::Key::Some(aes_key) => {
+            use aes::cipher::BlockDecrypt;
+            for chunk in bytes.chunks_mut(16) {
+                aes_key.decrypt_block(aes::Block::from_mut_slice(chunk))
+            }
+            Ok(())
         }
-        Ok(())
-    } else {
-        Err(super::Error::Encrypted)
+        super::Key::Denuvo(denuvo_cipher) => {
+            denuvo_cipher.decrypt(bytes);
+            Ok(())
+        }
+        super::Key::None => Err(super::Error::Encrypted),
+        #[cfg(not(feature = "encryption"))]
+        _ => Err(super::Error::Encrypted),
+    }
+}
+
+fn encrypt(key: &super::Key, bytes: &mut [u8]) -> Result<(), super::Error> {
+    match key {
+        #[cfg(feature = "encryption")]
+        super::Key::Some(aes_key) => {
+            use aes::cipher::BlockEncrypt;
+            for chunk in bytes.chunks_mut(16) {
+                aes_key.encrypt_block(aes::Block::from_mut_slice(chunk))
+            }
+            Ok(())
+        }
+        super::Key::Denuvo(denuvo_cipher) => {
+            denuvo_cipher.encrypt(bytes);
+            Ok(())
+        }
+        super::Key::None => Ok(()),
+        #[cfg(not(feature = "encryption"))]
+        _ => Ok(()),
     }
 }
 
@@ -322,20 +354,36 @@ impl<W: Write + Seek> PakWriter<W> {
     ) -> Result<(), Error> {
         let stream_position = self.writer.stream_position()?;
 
+        // Check if file entry encryption is required
+        // VDenuvo only encrypts the index, not file data
+        let should_encrypt = self.pak.version.requires_file_encryption();
+
         let entry = partial_entry.build_entry(
             self.pak.version,
             &mut self.pak.compression,
             stream_position,
+            should_encrypt, // Pass encryption flag
         )?;
 
+        // Write entry first (contains original compressed size, not padded)
         entry.write(
             &mut self.writer,
             self.pak.version,
             crate::entry::EntryLocation::Data,
         )?;
 
+        // Write file data (encrypt if needed)
+        if should_encrypt {
+            // For encrypted files, each block must be individually padded and encrypted
+            // to match the format expected by read_encoded()
+            let key = &self.key;
+            partial_entry.write_encrypted_data(&mut self.writer, |data| encrypt(key, data))?;
+        } else {
+            // Write unencrypted
+            partial_entry.write_data(&mut self.writer)?;
+        }
+
         self.pak.index.add_entry(path, entry);
-        partial_entry.write_data(&mut self.writer)?;
 
         Ok(())
     }
@@ -385,13 +433,17 @@ impl Pak {
         reader.seek(io::SeekFrom::Start(footer.index_offset))?;
         #[allow(unused_mut)]
         let mut index = reader.read_len(footer.index_size as usize)?;
+        eprintln!("DEBUG READ INDEX: encrypted {} bytes: {}", index.len(), hex::encode(&index[..index.len().min(64)]));
 
         // decrypt index if needed
         if footer.encrypted {
             #[cfg(not(feature = "encryption"))]
             return Err(super::Error::Encryption);
             #[cfg(feature = "encryption")]
-            decrypt(key, &mut index)?;
+            {
+                decrypt(key, &mut index)?;
+                eprintln!("DEBUG READ INDEX: decrypted: {}", hex::encode(&index[..index.len().min(64)]));
+            }
         }
 
         let mut index = io::Cursor::new(index);
@@ -406,6 +458,7 @@ impl Pak {
                 let path_hash_index_offset = index.read_u64::<LE>()?;
                 let path_hash_index_size = index.read_u64::<LE>()?;
                 let _path_hash_index_hash = index.read_len(20)?;
+                eprintln!("DEBUG READ: PHI offset={} size={}", path_hash_index_offset, path_hash_index_size);
 
                 reader.seek(io::SeekFrom::Start(path_hash_index_offset))?;
                 let mut path_hash_index_buf = reader.read_len(path_hash_index_size as usize)?;
@@ -420,10 +473,26 @@ impl Pak {
 
                 let mut path_hash_index = vec![];
                 let mut phi_reader = io::Cursor::new(&mut path_hash_index_buf);
-                for _ in 0..phi_reader.read_u32::<LE>()? {
+                let entry_count = phi_reader.read_u32::<LE>()?;
+                eprintln!("DEBUG READ: PHI entry count: {}", entry_count);
+                for i in 0..entry_count {
                     let hash = phi_reader.read_u64::<LE>()?;
                     let encoded_entry_offset = phi_reader.read_i32::<LE>()?;
+                    eprintln!("DEBUG READ: PHI entry {}: hash={:016x} offset={}", i, hash, encoded_entry_offset);
                     path_hash_index.push((hash, encoded_entry_offset));
+                }
+                let bytes_read = phi_reader.position();
+                let total_bytes = path_hash_index_buf.len();
+                let remaining = total_bytes - bytes_read as usize;
+                eprintln!("DEBUG READ: PHI bytes read: {} / {} (remaining: {})", bytes_read, total_bytes, remaining);
+
+                // Read remaining bytes to see what they are
+                if remaining > 0 {
+                    let remaining_data = &path_hash_index_buf[bytes_read as usize..];
+                    eprintln!("DEBUG READ: First 64 bytes of remaining PHI data: {}", hex::encode(&remaining_data[..remaining.min(64)]));
+                    // Check if it's all zeros
+                    let all_zeros = remaining_data.iter().all(|&b| b == 0);
+                    eprintln!("DEBUG READ: Remaining PHI data is all zeros: {}", all_zeros);
                 }
 
                 Some(path_hash_index)
@@ -436,6 +505,7 @@ impl Pak {
                 let full_directory_index_offset = index.read_u64::<LE>()?;
                 let full_directory_index_size = index.read_u64::<LE>()?;
                 let _full_directory_index_hash = index.read_len(20)?;
+                eprintln!("DEBUG READ: FDI offset={} size={}", full_directory_index_offset, full_directory_index_size);
 
                 reader.seek(io::SeekFrom::Start(full_directory_index_offset))?;
                 #[allow(unused_mut)]
@@ -530,11 +600,14 @@ impl Pak {
     fn write<W: Write + Seek>(
         &self,
         writer: &mut W,
-        _key: &super::Key,
+        key: &super::Key,
     ) -> Result<(), super::Error> {
         let index_offset = writer.stream_position()?;
 
         let mut index_buf = vec![];
+        // Pre-calculate index size components for later offset calculations
+        let mount_point_size = 4 + self.mount_point.len() + 1; // len + string + NUL
+
         let mut index_writer = io::Cursor::new(&mut index_buf);
         index_writer.write_string(&self.mount_point)?;
 
@@ -603,8 +676,7 @@ impl Pak {
                 size
             };
 
-            let path_hash_index_offset = index_offset + bytes_before_phi;
-
+            // PHI offset will be calculated after we know the padded index size
             let mut phi_buf = vec![];
             let mut phi_writer = io::Cursor::new(&mut phi_buf);
             generate_path_hash_index(
@@ -614,42 +686,112 @@ impl Pak {
                 &offsets,
             )?;
 
-            let full_directory_index_offset = path_hash_index_offset + phi_buf.len() as u64;
 
             let mut fdi_buf = vec![];
             let mut fdi_writer = io::Cursor::new(&mut fdi_buf);
             generate_full_directory_index(&mut fdi_writer, &self.index.entries, &offsets)?;
 
-            index_writer.write_u32::<LE>(1)?; // we have path hash index
+
+            // Store original unpadded sizes for debugging
+            let phi_unpadded_size = phi_buf.len();
+            let fdi_unpadded_size = fdi_buf.len();
+
+            // Pad buffers for encryption BEFORE hashing
+            // UE5's DecryptAndValidateIndex hashes the full decrypted buffer including padding
+            let encrypted = matches!(key, super::Key::Some(_) | super::Key::Denuvo(_));
+            if encrypted {
+                let phi_pad = (16 - (phi_buf.len() % 16)) % 16;
+                phi_buf.resize(phi_buf.len() + phi_pad, 0);
+                let fdi_pad = (16 - (fdi_buf.len() % 16)) % 16;
+                fdi_buf.resize(fdi_buf.len() + fdi_pad, 0);
+                eprintln!("DEBUG: PHI unpadded={} padded={} pad={}", phi_unpadded_size, phi_buf.len(), phi_pad);
+                eprintln!("DEBUG: FDI unpadded={} padded={} pad={}", fdi_unpadded_size, fdi_buf.len(), fdi_pad);
+            }
+
+            // Hash AFTER padding (UE5 validates hash of padded data)
+            let phi_hash = hash(&phi_buf);
+            let fdi_hash = hash(&fdi_buf);
+
+            // Calculate index padding (bytes_before_phi is the unpadded index size)
+            let index_padding = if encrypted {
+                (16 - (bytes_before_phi % 16)) % 16
+            } else {
+                0
+            };
+
+            // PHI starts after the padded index
+            let path_hash_index_offset = index_offset + bytes_before_phi + index_padding as u64;
+            // FDI starts after PHI
+            let fdi_offset = path_hash_index_offset + phi_buf.len() as u64;
+
+            // Write PHI metadata - must use padded size since that's what's encrypted on disk
+            eprintln!("DEBUG: Writing PHI metadata at offset {}", index_writer.position());
+            index_writer.write_u32::<LE>(1)?; // has_path_hash_index = true
             index_writer.write_u64::<LE>(path_hash_index_offset)?;
-            index_writer.write_u64::<LE>(phi_buf.len() as u64)?; // path hash index size
-            index_writer.write_all(&hash(&phi_buf).0)?;
+            index_writer.write_u64::<LE>(phi_buf.len() as u64)?; // Padded size
+            index_writer.write_all(&phi_hash.0)?;
+            eprintln!("DEBUG:   PHI: offset={} size={} (unpadded={})", path_hash_index_offset, phi_buf.len(), phi_unpadded_size);
 
-            index_writer.write_u32::<LE>(1)?; // we have full directory index
-            index_writer.write_u64::<LE>(full_directory_index_offset)?;
-            index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // path hash index size
-            index_writer.write_all(&hash(&fdi_buf).0)?;
+            // Write FDI metadata - must use padded size since that's what's encrypted on disk
+            eprintln!("DEBUG: Writing FDI metadata at offset {}", index_writer.position());
+            index_writer.write_u32::<LE>(1)?; // has_full_directory_index = true
+            index_writer.write_u64::<LE>(fdi_offset)?;
+            index_writer.write_u64::<LE>(fdi_buf.len() as u64)?; // Padded size
+            index_writer.write_all(&fdi_hash.0)?;
+            eprintln!("DEBUG:   FDI: offset={} size={} (unpadded={})", fdi_offset, fdi_buf.len(), fdi_unpadded_size);
 
+            // Write encoded entries
+            eprintln!("DEBUG: Writing encoded entries at offset {}, count={}", index_writer.position(), encoded_entries.len());
             index_writer.write_u32::<LE>(encoded_entries.len() as u32)?;
             index_writer.write_all(&encoded_entries)?;
+            eprintln!("DEBUG: After encoded entries, offset={}", index_writer.position());
 
             index_writer.write_u32::<LE>(0)?;
+            eprintln!("DEBUG: Final index offset after u32(0): {}", index_writer.position());
 
             Some((phi_buf, fdi_buf))
         };
 
+        eprintln!("DEBUG: index_buf before padding: {} bytes", index_buf.len());
+        eprintln!("DEBUG: index_buf hex (first 64 bytes): {}", hex::encode(&index_buf[..index_buf.len().min(64)]));
+
+        // Encrypt index if key provided
+        let encrypted = matches!(key, super::Key::Some(_) | super::Key::Denuvo(_));
+        if encrypted {
+            // Pad to 16-byte boundary for encryption
+            // UE5's DecryptAndValidateIndex hashes the full decrypted buffer including padding
+            let pad_len = (16 - (index_buf.len() % 16)) % 16;
+            eprintln!("DEBUG: index padding: {} bytes ({}->{})", pad_len, index_buf.len(), index_buf.len() + pad_len);
+            index_buf.resize(index_buf.len() + pad_len, 0);
+        }
+
+        // Hash AFTER padding but BEFORE encryption (UE5 validates hash of padded unencrypted data)
         let index_hash = hash(&index_buf);
+
+        if encrypted {
+            eprintln!("DEBUG: index_buf before encrypt: {}", hex::encode(&index_buf[..index_buf.len().min(64)]));
+            encrypt(key, &mut index_buf)?;
+            eprintln!("DEBUG: index_buf after encrypt: {}", hex::encode(&index_buf[..index_buf.len().min(64)]));
+        }
+        eprintln!("DEBUG: index_buf final: {} bytes", index_buf.len());
 
         writer.write_all(&index_buf)?;
 
         if let Some((phi_buf, fdi_buf)) = secondary_index {
+            let mut phi_buf = phi_buf;
+            let mut fdi_buf = fdi_buf;
+            if encrypted {
+                // Buffers already padded earlier, just encrypt
+                encrypt(key, &mut phi_buf)?;
+                encrypt(key, &mut fdi_buf)?;
+            }
             writer.write_all(&phi_buf[..])?;
             writer.write_all(&fdi_buf[..])?;
         }
 
         let footer = super::footer::Footer {
             encryption_uuid: None,
-            encrypted: false,
+            encrypted,
             magic: super::MAGIC,
             version: self.version,
             version_major: self.version.version_major(),
@@ -687,6 +829,7 @@ fn generate_path_hash_index<W: Write>(
     }
 
     writer.write_u32::<LE>(0)?;
+
 
     Ok(())
 }
@@ -755,13 +898,6 @@ fn generate_full_directory_index<W: Write>(
     Ok(())
 }
 
-#[cfg(feature = "encryption")]
-fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
-    use aes::cipher::BlockEncrypt;
-    for chunk in bytes.chunks_mut(16) {
-        key.encrypt_block(aes::Block::from_mut_slice(chunk))
-    }
-}
 
 #[cfg(test)]
 mod test {

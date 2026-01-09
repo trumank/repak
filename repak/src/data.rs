@@ -67,6 +67,7 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
         version: Version,
         #[allow(unused)] compression_slots: &mut Vec<Option<Compression>>,
         file_offset: u64,
+        encrypted: bool,
     ) -> Result<Entry> {
         #[cfg(feature = "compression")]
         let compression_slot = {
@@ -85,6 +86,27 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
         #[cfg(not(feature = "compression"))]
         let compression_slot = None;
 
+        // When encrypted, compressed_size must account for per-block padding
+        let compressed_size_actual = if encrypted {
+            match &self.data {
+                PartialEntryData::Slice(_) => {
+                    // Single block: align total size
+                    (self.compressed_size + 15) & !15
+                }
+                PartialEntryData::Blocks(blocks) => {
+                    // Multiple blocks: sum of aligned block sizes
+                    blocks
+                        .iter()
+                        .map(|b| (b.data.len() as u64 + 15) & !15)
+                        .sum()
+                }
+            }
+        } else {
+            self.compressed_size
+        };
+
+        // Blocks are needed even when encrypting - they guide decompression
+        // Each block is an independent compressed stream in the encrypted data
         let blocks = match &self.data {
             PartialEntryData::Slice(_) => None,
             PartialEntryData::Blocks(blocks) => {
@@ -112,15 +134,29 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
 
         Ok(Entry {
             offset: file_offset,
-            compressed: self.compressed_size,
+            compressed: compressed_size_actual,
             uncompressed: self.uncompressed_size,
             compression_slot,
             timestamp: None,
             hash: Some(self.hash),
             blocks,
-            flags: 0,
+            flags: if encrypted { 1 } else { 0 }, // Bit 0 = encrypted flag
             compression_block_size: self.compression_block_size,
         })
+    }
+
+    /// Get all data as a Vec for encryption
+    pub(crate) fn get_data_vec(&self) -> Vec<u8> {
+        match &self.data {
+            PartialEntryData::Slice(data) => data.as_ref().to_vec(),
+            PartialEntryData::Blocks(blocks) => {
+                let mut result = Vec::new();
+                for block in blocks {
+                    result.extend_from_slice(&block.data);
+                }
+                result
+            }
+        }
     }
     pub(crate) fn write_data<S: Write>(&self, stream: &mut S) -> Result<()> {
         match &self.data {
@@ -130,6 +166,37 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
             PartialEntryData::Blocks(blocks) => {
                 for block in blocks {
                     stream.write_all(&block.data)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Write encrypted data with per-block padding for encrypted multi-block files
+    pub(crate) fn write_encrypted_data<S: Write, F>(
+        &self,
+        stream: &mut S,
+        mut encrypt_fn: F,
+    ) -> Result<()>
+    where
+        F: FnMut(&mut Vec<u8>) -> Result<()>,
+    {
+        match &self.data {
+            PartialEntryData::Slice(data) => {
+                let mut data = data.as_ref().to_vec();
+                let pad_len = (16 - (data.len() % 16)) % 16;
+                data.resize(data.len() + pad_len, 0);
+                encrypt_fn(&mut data)?;
+                stream.write_all(&data)?;
+            }
+            PartialEntryData::Blocks(blocks) => {
+                // Encrypt each block individually with padding
+                for block in blocks {
+                    let mut data = block.data.clone();
+                    let pad_len = (16 - (data.len() % 16)) % 16;
+                    data.resize(data.len() + pad_len, 0);
+                    encrypt_fn(&mut data)?;
+                    stream.write_all(&data)?;
                 }
             }
         }
@@ -160,9 +227,11 @@ where
         }
         #[cfg(feature = "compression")]
         Some(compression) => {
-            // https://github.com/EpicGames/UnrealEngine/commit/3aad0ff7976be1073005dca2c1282af548b45d89
-            // Block size must fit into flags field or it may cause unreadable paks for earlier Unreal Engine versions
-            compression_block_size = 0x3e << 11; // max possible block size
+            // Use 64KB blocks to match original game paks
+            // For files smaller than 64KB, use the file size as block size
+            let max_block_size = 65536; // 64KB = 0x10000 = 0x20 << 11
+            compression_block_size = std::cmp::min(uncompressed_size as u32, max_block_size);
+
             let mut compressed_size = 0;
             let mut blocks = vec![];
             for chunk in data.as_ref().chunks(compression_block_size as usize) {
@@ -201,13 +270,13 @@ fn compress(compression: Compression, data: &[u8]) -> Result<Vec<u8>> {
     let compressed = match compression {
         Compression::Zlib => {
             let mut compress =
-                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
             compress.write_all(data.as_ref())?;
             compress.finish()?
         }
         Compression::Gzip => {
             let mut compress =
-                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
             compress.write_all(data.as_ref())?;
             compress.finish()?
         }

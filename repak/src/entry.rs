@@ -86,13 +86,13 @@ impl Entry {
             false => 0,
         };
         size += 20; // hash
+        // When compression exists, always write block count (4 bytes) + block data
         size += match compression {
-            Some(_) => 4 + (8 + 8) * block_count as u64, // blocks
+            Some(_) => 4 + (8 + 8) * block_count as u64, // block count (always) + blocks (if any)
             None => 0,
         };
-        size += 1; // encrypted
         size += match version.version_major() >= VersionMajor::CompressionEncryption {
-            true => 4, // blocks uncompressed
+            true => 1 + 4, // encrypted flag + compression_block_size
             false => 0,
         };
         size
@@ -107,7 +107,7 @@ impl Entry {
     ) -> Result<Self, Error> {
         let partial_entry = build_partial_entry(allowed_compression, data)?;
         let stream_position = writer.stream_position()?;
-        let entry = partial_entry.build_entry(version, compression_slots, stream_position)?;
+        let entry = partial_entry.build_entry(version, compression_slots, stream_position, false)?; // Not encrypted in this context
         entry.write(writer, version, crate::entry::EntryLocation::Data)?;
         partial_entry.write_data(writer)?;
         Ok(entry)
@@ -274,13 +274,27 @@ impl Entry {
             compression_block_size = 0x3f;
         }
         let compression_blocks_count = if self.compression_slot.is_some() {
-            self.blocks.as_ref().unwrap().len() as u32
+            self.blocks.as_ref().map_or(0, |b| b.len() as u32)
         } else {
             0
         };
         let is_size_32_bit_safe = self.compressed <= u32::MAX as u64;
         let is_uncompressed_size_32_bit_safe = self.uncompressed <= u32::MAX as u64;
         let is_offset_32_bit_safe = self.offset <= u32::MAX as u64;
+
+        let block_count = self.blocks.as_ref().map_or(0, |b| b.len());
+        let will_write_blocks = self.compression_slot.is_some() && self.blocks.is_some() &&
+            (block_count > 1 || self.is_encrypted());
+        let entry_size = 4 + // flags
+            (if compression_block_size == 0x3f { 4 } else { 0 }) +
+            (if is_offset_32_bit_safe { 4 } else { 8 }) +
+            (if is_uncompressed_size_32_bit_safe { 4 } else { 8 }) +
+            (if self.compression_slot.is_some() {
+                if is_size_32_bit_safe { 4 } else { 8 }
+            } else { 0 }) +
+            (if will_write_blocks { block_count * 4 } else { 0 });
+        eprintln!("DEBUG ENCODE: uncompressed={} blocks={} will_write_blocks={} entry_size={} compressed_block_size_encoded=0x{:x} write_extra_block_size={}",
+            self.uncompressed, block_count, will_write_blocks, entry_size, compression_block_size, compression_block_size == 0x3f);
 
         assert!(
             compression_blocks_count < 0x10_000,
@@ -320,12 +334,13 @@ impl Entry {
                 writer.write_u64::<LE>(self.compressed)?;
             }
 
-            assert!(self.blocks.is_some());
-            let blocks = self.blocks.as_ref().unwrap();
-            if blocks.len() > 1 || self.is_encrypted() {
-                for b in blocks {
-                    let block_size = b.end - b.start;
-                    writer.write_u32::<LE>(block_size.try_into().unwrap())?;
+            // When encrypted with no blocks (single compressed blob), skip block size writes
+            if let Some(blocks) = &self.blocks {
+                if blocks.len() > 1 || self.is_encrypted() {
+                    for b in blocks {
+                        let block_size = b.end - b.start;
+                        writer.write_u32::<LE>(block_size.try_into().unwrap())?;
+                    }
                 }
             }
         }
@@ -345,25 +360,29 @@ impl Entry {
         Entry::read(reader, version)?;
         #[cfg(any(feature = "compression", feature = "oodle"))]
         let data_offset = reader.stream_position()?;
+
         #[allow(unused_mut)]
         let mut data = reader.read_len(match self.is_encrypted() {
             true => align(self.compressed),
             false => self.compressed,
         } as usize)?;
         if self.is_encrypted() {
-            #[cfg(not(feature = "encryption"))]
-            return Err(super::Error::Encryption);
-            #[cfg(feature = "encryption")]
-            {
-                let super::Key::Some(key) = key else {
-                    return Err(super::Error::Encrypted);
-                };
-                use aes::cipher::BlockDecrypt;
-                for block in data.chunks_mut(16) {
-                    key.decrypt_block(aes::Block::from_mut_slice(block))
+            match key {
+                #[cfg(feature = "encryption")]
+                super::Key::Some(aes_key) => {
+                    use aes::cipher::BlockDecrypt;
+                    for block in data.chunks_mut(16) {
+                        aes_key.decrypt_block(aes::Block::from_mut_slice(block))
+                    }
                 }
-                data.truncate(self.compressed as usize);
+                super::Key::Denuvo(denuvo_cipher) => {
+                    denuvo_cipher.decrypt(&mut data);
+                }
+                super::Key::None => {
+                    return Err(super::Error::Encrypted);
+                }
             }
+            data.truncate(self.compressed as usize);
         }
 
         #[cfg(feature = "compression")]

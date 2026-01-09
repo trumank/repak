@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 mod data;
+mod denuvo;
 mod entry;
 mod error;
 mod ext;
 mod footer;
 mod pak;
 
+pub use denuvo::DenuvoCipher;
 pub use {data::PartialEntry, error::*, pak::*};
 
 pub const MAGIC: u32 = 0x5A6F12E1;
@@ -37,6 +39,7 @@ pub enum Version {
     V9,
     V10,
     V11,
+    VDenuvo, // V11 + mandatory Denuvo encryption
 }
 
 #[repr(u32)]
@@ -107,7 +110,19 @@ impl Version {
             Version::V9 => VersionMajor::FrozenIndex,
             Version::V10 => VersionMajor::PathHashIndex,
             Version::V11 => VersionMajor::Fnv64BugFix,
+            Version::VDenuvo => VersionMajor::Fnv64BugFix, // Same as V11
         }
+    }
+
+    /// Check if this version is VDenuvo
+    pub fn is_denuvo(&self) -> bool {
+        matches!(self, Version::VDenuvo)
+    }
+
+    /// Check if file entries must be encrypted for this version
+    /// VDenuvo encrypts INDEX only, not file data
+    pub fn requires_file_encryption(&self) -> bool {
+        false  // VDenuvo only encrypts the index, not file data
     }
 }
 
@@ -127,6 +142,8 @@ pub enum Compression {
 pub(crate) enum Key {
     #[cfg(feature = "encryption")]
     Some(aes::Aes256),
+    /// Denuvo custom cipher (always available)
+    Denuvo(DenuvoCipher),
     #[default]
     None,
 }
@@ -135,5 +152,11 @@ pub(crate) enum Key {
 impl From<aes::Aes256> for Key {
     fn from(value: aes::Aes256) -> Self {
         Self::Some(value)
+    }
+}
+
+impl From<DenuvoCipher> for Key {
+    fn from(value: DenuvoCipher) -> Self {
+        Self::Denuvo(value)
     }
 }

@@ -151,6 +151,10 @@ struct Args {
     #[arg(short, long)]
     aes_key: Option<AesKey>,
 
+    /// Use Denuvo custom cipher for encryption/decryption (overrides --aes-key)
+    #[arg(short, long, default_value_t = false)]
+    denuvo: bool,
+
     #[command(subcommand)]
     action: Action,
 }
@@ -176,24 +180,40 @@ impl std::str::FromStr for AesKey {
     }
 }
 
+enum EncryptionKey {
+    Aes(aes::Aes256),
+    Denuvo,
+    None,
+}
+
 fn main() -> Result<(), repak::Error> {
     let args = Args::parse();
-    let aes_key = args.aes_key.map(|k| k.0);
+    
+    // Denuvo flag takes priority over AES key
+    let key = if args.denuvo {
+        EncryptionKey::Denuvo
+    } else if let Some(aes_key) = args.aes_key {
+        EncryptionKey::Aes(aes_key.0)
+    } else {
+        EncryptionKey::None
+    };
 
     match args.action {
-        Action::Info(action) => info(aes_key, action),
-        Action::List(action) => list(aes_key, action),
-        Action::HashList(action) => hash_list(aes_key, action),
-        Action::Unpack(action) => unpack(aes_key, action),
-        Action::Pack(action) => pack(action),
-        Action::Get(action) => get(aes_key, action),
+        Action::Info(action) => info(key, action),
+        Action::List(action) => list(key, action),
+        Action::HashList(action) => hash_list(key, action),
+        Action::Unpack(action) => unpack(key, action),
+        Action::Pack(action) => pack(key, action),
+        Action::Get(action) => get(key, action),
     }
 }
 
-fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::Error> {
+fn info(key: EncryptionKey, action: ActionInfo) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
-    if let Some(aes_key) = aes_key {
-        builder = builder.key(aes_key);
+    match key {
+        EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
+        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
     println!("mount point: {}", pak.mount_point());
@@ -212,10 +232,12 @@ fn info(aes_key: Option<aes::Aes256>, action: ActionInfo) -> Result<(), repak::E
     Ok(())
 }
 
-fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::Error> {
+fn list(key: EncryptionKey, action: ActionList) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
-    if let Some(aes_key) = aes_key {
-        builder = builder.key(aes_key);
+    match key {
+        EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
+        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut BufReader::new(File::open(action.input)?))?;
 
@@ -245,10 +267,12 @@ fn list(aes_key: Option<aes::Aes256>, action: ActionList) -> Result<(), repak::E
     Ok(())
 }
 
-fn hash_list(aes_key: Option<aes::Aes256>, action: ActionHashList) -> Result<(), repak::Error> {
+fn hash_list(key: EncryptionKey, action: ActionHashList) -> Result<(), repak::Error> {
     let mut builder = repak::PakBuilder::new();
-    if let Some(aes_key) = aes_key {
-        builder = builder.key(aes_key);
+    match key {
+        EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
+        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut BufReader::new(File::open(&action.input)?))?;
 
@@ -317,11 +341,13 @@ impl Output {
     }
 }
 
-fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repak::Error> {
+fn unpack(key: EncryptionKey, action: ActionUnpack) -> Result<(), repak::Error> {
     for input in &action.input {
         let mut builder = repak::PakBuilder::new();
-        if let Some(aes_key) = aes_key.clone() {
-            builder = builder.key(aes_key);
+        match &key {
+            EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key.clone()),
+            EncryptionKey::Denuvo => builder = builder.denuvo(),
+            EncryptionKey::None => {}
         }
         let pak = builder.reader(&mut BufReader::new(File::open(input)?))?;
         let output = action
@@ -453,7 +479,7 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
     Ok(())
 }
 
-fn pack(args: ActionPack) -> Result<(), repak::Error> {
+fn pack(key: EncryptionKey, args: ActionPack) -> Result<(), repak::Error> {
     let output = args.output.map(PathBuf::from).unwrap_or_else(|| {
         // NOTE: don't use `with_extension` here because it will replace e.g. the `.1` in
         // `test_v1.1`.
@@ -482,7 +508,20 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     collect_files(&mut paths, input_path)?;
     paths.sort();
 
-    let mut pak = repak::PakBuilder::new()
+    // Force Denuvo key if VDenuvo version is used, otherwise use provided key
+    let key = if args.version == repak::Version::VDenuvo {
+        EncryptionKey::Denuvo
+    } else {
+        key
+    };
+
+    let mut builder = repak::PakBuilder::new();
+    match key {
+        EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
+        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::None => {}
+    }
+    let mut pak = builder
         .compression(args.compression.iter().cloned())
         .writer(
             BufWriter::new(File::create(&output)?),
@@ -506,38 +545,37 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     };
     let log = log.clone();
 
-    let mut result = None;
-    let result_ref = &mut result;
-    rayon::in_place_scope(|scope| -> Result<(), repak::Error> {
-        let (tx, rx) = std::sync::mpsc::sync_channel(0);
-        let entry_builder = pak.entry_builder();
+    // Build entries in parallel but collect them first
+    let entry_builder = pak.entry_builder();
+    let entries: Vec<(String, _)> = iter
+        .par_bridge()
+        .map(|p| -> Result<(String, _), repak::Error> {
+            let rel = p
+                .strip_prefix(input_path)
+                .expect("file not in input directory")
+                .to_slash()
+                .expect("failed to convert to slash path");
+            if args.verbose {
+                log.println(format!("packing {}", &rel));
+            }
+            let entry = entry_builder.build_entry(true, std::fs::read(p)?)?;
+            Ok((rel.to_string(), entry))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-        scope.spawn(move |_| {
-            *result_ref = Some(
-                iter.par_bridge()
-                    .try_for_each(|p| -> Result<(), repak::Error> {
-                        let rel = &p
-                            .strip_prefix(input_path)
-                            .expect("file not in input directory")
-                            .to_slash()
-                            .expect("failed to convert to slash path");
-                        if args.verbose {
-                            log.println(format!("packing {}", &rel));
-                        }
-                        let entry = entry_builder.build_entry(true, std::fs::read(p)?)?;
+    // Sort entries by path to ensure consistent file order on disk
+    let mut entries_sorted = entries;
+    entries_sorted.sort_by(|a, b| a.0.cmp(&b.0));
 
-                        tx.send((rel.to_string(), entry)).unwrap();
-                        Ok(())
-                    }),
-            );
-        });
+    eprintln!("DEBUG: Writing {} entries in sorted order:", entries_sorted.len());
+    for (i, (path, _)) in entries_sorted.iter().enumerate() {
+        eprintln!("  [{}] {}", i, path);
+    }
 
-        for (path, entry) in rx {
-            pak.write_entry(path, entry)?;
-        }
-        Ok(())
-    })?;
-    result.unwrap()?;
+    // Write entries in sorted order
+    for (path, entry) in entries_sorted {
+        pak.write_entry(path, entry)?;
+    }
 
     pak.write_index()?;
 
@@ -548,11 +586,13 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     Ok(())
 }
 
-fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error> {
+fn get(key: EncryptionKey, args: ActionGet) -> Result<(), repak::Error> {
     let mut reader = BufReader::new(File::open(&args.input)?);
     let mut builder = repak::PakBuilder::new();
-    if let Some(aes_key) = aes_key {
-        builder = builder.key(aes_key);
+    match key {
+        EncryptionKey::Aes(aes_key) => builder = builder.key(aes_key),
+        EncryptionKey::Denuvo => builder = builder.denuvo(),
+        EncryptionKey::None => {}
     }
     let pak = builder.reader(&mut reader)?;
     let mount_point = PathBuf::from(pak.mount_point());
