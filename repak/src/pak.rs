@@ -481,6 +481,11 @@ impl Pak {
                 let mut encoded_entries = io::Cursor::new(&encoded_entries);
                 for (dir_name, dir) in fdi {
                     for (file_name, encoded_offset) in dir {
+                        // i32::MIN (0x80000000) is a deleted/pruned entry sentinel
+                        // in the UE5 PAK format — skip it to avoid negate overflow.
+                        if *encoded_offset == i32::MIN {
+                            continue;
+                        }
                         let entry = if *encoded_offset >= 0 {
                             encoded_entries.set_position(*encoded_offset as u64);
                             Entry::read_encoded(&mut encoded_entries, version)?
