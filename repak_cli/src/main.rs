@@ -111,6 +111,10 @@ struct ActionPack {
     /// Hides normal output such as progress bar and completion status
     #[arg(short, long, default_value = "false")]
     quiet: bool,
+
+    /// Exclude a directory or pattern from packing, can be specified multiple times. No file is excluded if unspecified
+    #[arg(action = clap::ArgAction::Append, short, long)]
+    exclude: Vec<glob::Pattern>,
 }
 
 #[derive(Parser, Debug)]
@@ -460,14 +464,35 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         PathBuf::from(format!("{}.pak", args.input))
     });
 
-    fn collect_files(paths: &mut Vec<PathBuf>, dir: &Path) -> io::Result<()> {
+    fn collect_files(paths: &mut Vec<PathBuf>, dir: &Path,exclude: &Vec<glob::Pattern>) -> io::Result<()> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                collect_files(paths, &path)?;
+                collect_files(paths, &path,&exclude)?;
             } else {
-                paths.push(entry.path());
+                let options = glob::MatchOptions {
+                    case_sensitive: true,
+                    require_literal_separator: true,
+                    require_literal_leading_dot: false,
+                };
+
+                let match_path = &entry.path().iter().skip(1).collect::<PathBuf>();
+                if exclude.iter().any(|i| {
+                    // check full file path
+                    i.matches_path_with(&match_path, options)
+                        // check ancestor directories
+                        || match_path.ancestors().skip(1).any(|a| {
+                            i.matches_path_with(a, options)
+                                // hack to check ancestor directories with trailing slash
+                                || i.matches_path_with(&a.join(""), options)
+                        })
+                }) {
+                    continue;
+                }
+                else {
+                    paths.push(entry.path());
+                }
             }
         }
         Ok(())
@@ -479,7 +504,7 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
         ));
     }
     let mut paths = vec![];
-    collect_files(&mut paths, input_path)?;
+    collect_files(&mut paths, input_path,&args.exclude)?;
     paths.sort();
 
     let mut pak = repak::PakBuilder::new()
