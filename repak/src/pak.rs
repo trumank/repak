@@ -491,7 +491,13 @@ impl Pak {
                             Entry::read_encoded(&mut encoded_entries, version)?
                         } else {
                             let index = (-*encoded_offset) as usize - 1;
-                            non_encoded_entries[index].clone()
+                            non_encoded_entries
+                                .get(index)
+                                .ok_or(super::Error::UnknownNonEncodedEntry(
+                                    index,
+                                    non_encoded_entries.len(),
+                                ))?
+                                .clone()
                         };
                         let path = format!(
                             "{}{}",
