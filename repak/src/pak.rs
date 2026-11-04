@@ -108,11 +108,7 @@ impl Pak {
             encrypted_index: false,
             encryption_guid: None,
             compression: (if version.version_major() < VersionMajor::FNameBasedCompression {
-                vec![
-                    Some(Compression::Zlib),
-                    Some(Compression::Gzip),
-                    Some(Compression::Oodle),
-                ]
+                crate::footer::LEGACY_COMPRESSION.to_vec()
             } else {
                 vec![]
             }),
@@ -771,6 +767,21 @@ fn encrypt(key: aes::Aes256, bytes: &mut [u8]) {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_legacy_compression_slots() {
+        // Slot is ECompressionFlags - 1: ZLIB 0x01, GZIP 0x02, COMPRESS_Custom 0x04
+        let pak = Pak::new(Version::V5, "../../../".to_string(), None);
+        assert_eq!(
+            pak.compression,
+            vec![
+                Some(Compression::Zlib),
+                Some(Compression::Gzip),
+                None,
+                Some(Compression::Oodle),
+            ]
+        );
+    }
 
     #[test]
     fn test_split_path_child() {

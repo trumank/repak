@@ -394,7 +394,13 @@ impl Entry {
             };
         }
 
-        match self.compression_slot.and_then(|c| compression[c as usize]) {
+        let compression = match self.compression_slot {
+            Some(c) => *compression.get(c as usize).ok_or_else(|| {
+                super::Error::Other(format!("entry uses unknown compression slot {c}"))
+            })?,
+            None => None,
+        };
+        match compression {
             None => buf.write_all(&data)?,
             #[cfg(not(feature = "compression"))]
             _ => return Err(super::Error::Compression),
@@ -464,5 +470,40 @@ mod test {
             .write(&mut out, super::Version::V5, super::EntryLocation::Data)
             .unwrap();
         assert_eq!(&data, &out);
+    }
+
+    #[test]
+    fn test_read_file_unknown_compression_slot() {
+        let entry = super::Entry {
+            offset: 0,
+            compressed: 4,
+            uncompressed: 4,
+            compression_slot: Some(4),
+            timestamp: None,
+            hash: Some(super::super::Hash([0; 20])),
+            blocks: Some(vec![]),
+            flags: 0,
+            compression_block_size: 0,
+        };
+        let mut data = vec![];
+        entry
+            .write(&mut data, super::Version::V5, super::EntryLocation::Data)
+            .unwrap();
+        data.extend([0; 4]);
+
+        let compression = [
+            Some(super::Compression::Zlib),
+            Some(super::Compression::Gzip),
+            None,
+            Some(super::Compression::Oodle),
+        ];
+        let result = entry.read_file(
+            &mut std::io::Cursor::new(data),
+            super::Version::V5,
+            &compression,
+            &super::super::Key::None,
+            &mut vec![],
+        );
+        assert!(matches!(result, Err(super::super::Error::Other(_))));
     }
 }

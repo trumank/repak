@@ -7,6 +7,16 @@ use super::{ext::ReadExt, Compression, Version, VersionMajor};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::str::FromStr;
 
+/// Compression slots of paks older than FNameBasedCompression, which store no method names.
+/// There the entry's compression field is an `ECompressionFlags` value (0x01 ZLIB, 0x02 GZIP,
+/// 0x04 COMPRESS_Custom), and the entry's slot is that value minus one. 0x03 is not a codec.
+pub(crate) const LEGACY_COMPRESSION: [Option<Compression>; 4] = [
+    Some(Compression::Zlib),
+    Some(Compression::Gzip),
+    None,
+    Some(Compression::Oodle),
+];
+
 #[derive(Debug)]
 pub struct Footer {
     pub encryption_uuid: Option<u128>,
@@ -54,9 +64,7 @@ impl Footer {
                 )
             }
             if version.version_major() < VersionMajor::FNameBasedCompression {
-                compression.push(Some(Compression::Zlib));
-                compression.push(Some(Compression::Gzip));
-                compression.push(Some(Compression::Oodle));
+                compression.extend(LEGACY_COMPRESSION);
             }
             compression
         };
@@ -114,5 +122,39 @@ impl Footer {
             writer.write_all(&name)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_legacy_compression() {
+        let footer = Footer {
+            encryption_uuid: None,
+            encrypted: false,
+            magic: crate::MAGIC,
+            version: Version::V5,
+            version_major: VersionMajor::RelativeChunkOffsets,
+            index_offset: 0,
+            index_size: 0,
+            hash: Hash([0; 20]),
+            frozen: false,
+            compression: vec![],
+        };
+        let mut buf = vec![];
+        footer.write(&mut buf).unwrap();
+        let footer = Footer::read(&mut std::io::Cursor::new(buf), Version::V5).unwrap();
+        // Indexed by ECompressionFlags - 1: ZLIB 0x01, GZIP 0x02, COMPRESS_Custom 0x04
+        assert_eq!(
+            footer.compression,
+            vec![
+                Some(Compression::Zlib),
+                Some(Compression::Gzip),
+                None,
+                Some(Compression::Oodle),
+            ]
+        );
     }
 }
