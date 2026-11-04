@@ -104,8 +104,9 @@ impl Entry {
         compression_slots: &mut Vec<Option<Compression>>,
         allowed_compression: &[Compression],
         data: &[u8],
+        key: &super::Key,
     ) -> Result<Self, Error> {
-        let partial_entry = build_partial_entry(allowed_compression, data)?;
+        let partial_entry = build_partial_entry(allowed_compression, data, key)?;
         let stream_position = writer.stream_position()?;
         let entry = partial_entry.build_entry(version, compression_slots, stream_position)?;
         entry.write(writer, version, crate::entry::EntryLocation::Data)?;

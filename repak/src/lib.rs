@@ -123,7 +123,7 @@ pub enum Compression {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) enum Key {
     #[cfg(feature = "encryption")]
     Some(aes::Aes256),

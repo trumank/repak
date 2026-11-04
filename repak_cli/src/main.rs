@@ -147,7 +147,7 @@ enum Action {
 #[derive(Parser, Debug)]
 #[command(author, version)]
 struct Args {
-    /// 256 bit AES encryption key as base64 or hex string if the pak is encrypted
+    /// 256 bit AES encryption key as base64 or hex string to read an encrypted pak or encrypt one on pack
     #[arg(short, long)]
     aes_key: Option<AesKey>,
 
@@ -185,7 +185,7 @@ fn main() -> Result<(), repak::Error> {
         Action::List(action) => list(aes_key, action),
         Action::HashList(action) => hash_list(aes_key, action),
         Action::Unpack(action) => unpack(aes_key, action),
-        Action::Pack(action) => pack(action),
+        Action::Pack(action) => pack(aes_key, action),
         Action::Get(action) => get(aes_key, action),
     }
 }
@@ -453,7 +453,7 @@ fn unpack(aes_key: Option<aes::Aes256>, action: ActionUnpack) -> Result<(), repa
     Ok(())
 }
 
-fn pack(args: ActionPack) -> Result<(), repak::Error> {
+fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Error> {
     let output = args.output.map(PathBuf::from).unwrap_or_else(|| {
         // NOTE: don't use `with_extension` here because it will replace e.g. the `.1` in
         // `test_v1.1`.
@@ -482,7 +482,17 @@ fn pack(args: ActionPack) -> Result<(), repak::Error> {
     collect_files(&mut paths, input_path)?;
     paths.sort();
 
-    let mut pak = repak::PakBuilder::new()
+    let mut builder = repak::PakBuilder::new();
+    if let Some(aes_key) = aes_key {
+        if args.version.version_major() < repak::VersionMajor::CompressionEncryption {
+            return Err(repak::Error::Other(format!(
+                "pak version {:?} doesn't support encryption",
+                args.version
+            )));
+        }
+        builder = builder.key(aes_key);
+    }
+    let mut pak = builder
         .compression(args.compression.iter().cloned())
         .writer(
             BufWriter::new(File::create(&output)?),

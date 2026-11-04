@@ -159,7 +159,39 @@ fn test_read(version: repak::Version, _file_name: &str, bytes: &[u8]) {
     }
 }
 
-fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
+/// Compares paks by decoded content, for when their padding bytes differ
+fn assert_pak_content_equal(key: aes::Aes256, original: &[u8], rewritten: &[u8]) {
+    let mut original_reader = std::io::Cursor::new(original);
+    let original_pak = repak::PakBuilder::new()
+        .key(key.clone())
+        .reader(&mut original_reader)
+        .unwrap();
+
+    let mut rewritten_reader = std::io::Cursor::new(rewritten);
+    let rewritten_pak = repak::PakBuilder::new()
+        .key(key)
+        .reader(&mut rewritten_reader)
+        .unwrap();
+
+    assert_eq!(original_pak.mount_point(), rewritten_pak.mount_point());
+    use std::collections::HashSet;
+    let original_files: HashSet<String> = HashSet::from_iter(original_pak.files());
+    let rewritten_files: HashSet<String> = HashSet::from_iter(rewritten_pak.files());
+    assert_eq!(original_files, rewritten_files);
+
+    for path in original_files {
+        let original_data = original_pak.get(&path, &mut original_reader).unwrap();
+        let rewritten_data = rewritten_pak.get(&path, &mut rewritten_reader).unwrap();
+        assert_eq!(original_data, rewritten_data, "{path} contents differ");
+    }
+}
+
+/// Whether a fixture's file data is encrypted (`_encrypt`, not only `_encryptindex`)
+fn has_encrypted_data(file_name: &str) -> bool {
+    file_name.contains("_encrypt.") || file_name.contains("_encrypt_")
+}
+
+fn test_write(version: repak::Version, file_name: &str, bytes: &[u8]) {
     use aes::cipher::KeyInit;
     use base64::{engine::general_purpose, Engine as _};
     let key = general_purpose::STANDARD
@@ -171,24 +203,36 @@ fn test_write(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
 
     let mut reader = std::io::Cursor::new(bytes);
     let pak_reader = repak::PakBuilder::new()
-        .key(key)
+        .key(key.clone())
         .reader(&mut reader)
         .unwrap();
 
+    let encrypted_data = has_encrypted_data(file_name);
     let writer = Cursor::new(vec![]);
-    let mut pak_writer = repak::PakBuilder::new().writer(
-        writer,
-        pak_reader.version(),
-        pak_reader.mount_point().to_owned(),
-        Some(0x205C5A7D),
-    );
+    let mut pak_writer = repak::PakBuilder::new()
+        .key(key.clone())
+        .encrypt_index(pak_reader.encrypted_index())
+        .encrypt_data(encrypted_data)
+        .writer(
+            writer,
+            pak_reader.version(),
+            pak_reader.mount_point().to_owned(),
+            pak_reader.path_hash_seed(),
+        );
 
     for path in pak_reader.files() {
         let data = pak_reader.get(&path, &mut reader).unwrap();
         pak_writer.write_file(&path, false, data).unwrap();
     }
 
-    assert!(pak_writer.write_index().unwrap().into_inner() == reader.into_inner());
+    let rewrite = pak_writer.write_index().unwrap().into_inner();
+    if encrypted_data && version == repak::Version::V5 {
+        // UnrealPak 4.20 pads encrypted data with random bytes
+        assert_eq!(rewrite.len(), bytes.len());
+        assert_pak_content_equal(key, bytes, &rewrite);
+    } else {
+        assert!(rewrite == reader.into_inner());
+    }
 }
 
 fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) {
@@ -212,6 +256,40 @@ fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) 
         .into_inner();
 
     assert!(bytes == rewrite);
+}
+
+fn test_rewrite_add_file(_version: repak::Version, file_name: &str, bytes: &[u8]) {
+    use aes::cipher::KeyInit;
+    use base64::{engine::general_purpose, Engine as _};
+    let key = general_purpose::STANDARD
+        .decode(AES_KEY)
+        .as_ref()
+        .map_err(|_| repak::Error::Aes)
+        .and_then(|bytes| aes::Aes256::new_from_slice(bytes).map_err(|_| repak::Error::Aes))
+        .unwrap();
+
+    const MARKER: &[u8] = b"plaintext marker for a file added on rewrite";
+
+    let mut buf = std::io::Cursor::new(bytes.to_vec());
+    let pak_reader = repak::PakBuilder::new()
+        .key(key.clone())
+        .reader(&mut buf)
+        .unwrap();
+    let mut pak_writer = pak_reader.into_pakwriter(buf).unwrap();
+    pak_writer.write_file("added.txt", false, MARKER).unwrap();
+    let rewrite = pak_writer.write_index().unwrap().into_inner();
+
+    // a file added on rewrite is encrypted only if the source pak's data was
+    let data_encrypted = has_encrypted_data(file_name);
+    let plaintext_found = rewrite.windows(MARKER.len()).any(|w| w == MARKER);
+    assert_eq!(plaintext_found, !data_encrypted);
+
+    let mut reader = std::io::Cursor::new(rewrite);
+    let pak_reader = repak::PakBuilder::new()
+        .key(key)
+        .reader(&mut reader)
+        .unwrap();
+    assert_eq!(pak_reader.get("added.txt", &mut reader).unwrap(), MARKER);
 }
 
 macro_rules! matrix_test {
@@ -279,8 +357,8 @@ matrix_test!(
         "v11" repak::Version::V11,
     ),
     ("", /*"_compress"*/),
-    ("", /*"_encrypt"*/),
-    ("", /*"_encryptindex"*/),
+    ("", "_encrypt"),
+    ("", "_encryptindex"),
     test_write
 );
 
@@ -296,8 +374,24 @@ matrix_test!(
     ),
     ("", "_compress"),
     ("", "_encrypt"),
-    ("", /*"_encryptindex"*/),
+    ("", "_encryptindex"),
     test_rewrite_index
+);
+
+matrix_test!(
+    "rewrite_add_file",
+    (
+        "v5" repak::Version::V5,
+        "v7" repak::Version::V7,
+        "v8a" repak::Version::V8A,
+        "v8b" repak::Version::V8B,
+        "v9" repak::Version::V9,
+        "v11" repak::Version::V11,
+    ),
+    ("", "_compress"),
+    ("", "_encrypt"),
+    ("", "_encryptindex"),
+    test_rewrite_add_file
 );
 
 mod roundtrip {
@@ -347,6 +441,93 @@ mod roundtrip {
                 "mismatched content for {} with version {:?} compression {:?}",
                 path, version, compression,
             );
+        }
+    }
+
+    #[test]
+    fn roundtrip_encrypted() {
+        use aes::cipher::KeyInit;
+        let key = aes::Aes256::new_from_slice(&[7; 32]).unwrap();
+        let files: &[(&str, &[u8])] = &[
+            ("hello.txt", b"Hello, world!"),
+            ("empty.txt", b""),
+            ("multi_block.txt", &b"0123456789abcdef".repeat(20000)),
+        ];
+
+        for version in [
+            repak::Version::V5,
+            repak::Version::V7,
+            repak::Version::V8A,
+            repak::Version::V8B,
+            repak::Version::V9,
+            repak::Version::V11,
+        ] {
+            for compress in [false, true] {
+                let mut pak_writer = repak::PakBuilder::new()
+                    .key(key.clone())
+                    .compression([repak::Compression::Zlib])
+                    .writer(Cursor::new(vec![]), version, "../../../".to_string(), None);
+                let entry_builder = pak_writer.entry_builder();
+                for (path, data) in files {
+                    let entry = entry_builder.build_entry(compress, *data).unwrap();
+                    pak_writer.write_entry(path.to_string(), entry).unwrap();
+                }
+                let buf = pak_writer.write_index().unwrap().into_inner();
+
+                assert!(!buf.windows(13).any(|w| w == b"Hello, world!"));
+                assert!(repak::PakBuilder::new()
+                    .reader(&mut Cursor::new(&buf))
+                    .is_err());
+
+                let mut reader = Cursor::new(&buf);
+                let pak_reader = repak::PakBuilder::new()
+                    .key(key.clone())
+                    .reader(&mut reader)
+                    .unwrap();
+                assert_eq!(pak_reader.version(), version);
+                for (path, expected_data) in files {
+                    let data = pak_reader.get(path, &mut reader).unwrap();
+                    assert!(
+                        data == *expected_data,
+                        "mismatched content for {path} with version {version:?} compress {compress}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn roundtrip_encrypted_old_versions() {
+        use aes::cipher::KeyInit;
+        let key = aes::Aes256::new_from_slice(&[7; 32]).unwrap();
+        let data: &[u8] = b"Hello, world!";
+
+        // a key encrypts only what the pak version supports
+        for (version, data_encrypted, index_encrypted) in [
+            (repak::Version::V1, false, false),
+            (repak::Version::V2, false, false),
+            (repak::Version::V3, true, false),
+            (repak::Version::V4, true, true),
+        ] {
+            let mut pak_writer = repak::PakBuilder::new().key(key.clone()).writer(
+                Cursor::new(vec![]),
+                version,
+                "../../../".to_string(),
+                None,
+            );
+            pak_writer.write_file("hello.txt", false, data).unwrap();
+            let buf = pak_writer.write_index().unwrap().into_inner();
+
+            let plaintext_found = buf.windows(data.len()).any(|w| w == data);
+            assert_eq!(plaintext_found, !data_encrypted, "{version:?}");
+
+            let mut reader = Cursor::new(&buf);
+            let pak_reader = repak::PakBuilder::new()
+                .key(key.clone())
+                .reader(&mut reader)
+                .unwrap();
+            assert_eq!(pak_reader.encrypted_index(), index_encrypted, "{version:?}");
+            assert_eq!(pak_reader.get("hello.txt", &mut reader).unwrap(), data);
         }
     }
 

@@ -14,13 +14,18 @@ pub struct PartialEntry<D: AsRef<[u8]>> {
     compression_block_size: u32,
     data: PartialEntryData<D>,
     hash: Hash,
+    encrypted: bool,
 }
 pub(crate) struct PartialBlock {
     uncompressed_size: usize,
+    /// Compressed size before padding for encryption
+    unpadded_size: usize,
     data: Vec<u8>,
 }
 pub(crate) enum PartialEntryData<D> {
     Slice(D),
+    /// Uncompressed data, padded and encrypted
+    Encrypted(Vec<u8>),
     Blocks(Vec<PartialBlock>),
 }
 
@@ -82,8 +87,14 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
             "compressed entry must have at least one block"
         );
 
+        if self.encrypted && version.version_major() < VersionMajor::CompressionEncryption {
+            return Err(Error::Other(
+                "cannot encrypt entries prior to CompressionEncryption (pak version 3)".to_owned(),
+            ));
+        }
+
         let blocks = match &self.data {
-            PartialEntryData::Slice(_) => None,
+            PartialEntryData::Slice(_) | PartialEntryData::Encrypted(_) => None,
             PartialEntryData::Blocks(blocks) => {
                 let entry_size =
                     Entry::get_serialized_size(version, compression_slot, blocks.len() as u32);
@@ -97,9 +108,10 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
                     blocks
                         .iter()
                         .map(|block| {
+                            // an encrypted block ends before its padding
                             let start = offset;
                             offset += block.data.len() as u64;
-                            let end = offset;
+                            let end = start + block.unpadded_size as u64;
                             Block { start, end }
                         })
                         .collect(),
@@ -115,7 +127,7 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
             timestamp: None,
             hash: Some(self.hash),
             blocks,
-            flags: 0,
+            flags: self.encrypted as u8,
             compression_block_size: self.compression_block_size,
         })
     }
@@ -123,6 +135,9 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
         match &self.data {
             PartialEntryData::Slice(data) => {
                 stream.write_all(data.as_ref())?;
+            }
+            PartialEntryData::Encrypted(data) => {
+                stream.write_all(data)?;
             }
             PartialEntryData::Blocks(blocks) => {
                 for block in blocks {
@@ -137,11 +152,13 @@ impl<D: AsRef<[u8]>> PartialEntry<D> {
 pub(crate) fn build_partial_entry<D>(
     allowed_compression: &[Compression],
     data: D,
+    key: &super::Key,
 ) -> Result<PartialEntry<D>>
 where
     D: AsRef<[u8]>,
 {
-    // TODO hash needs to be post-compression/encryption
+    // UnrealPak hashes the stored bytes (compressed and encrypted), excluding the padding of
+    // uncompressed data
     use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
 
@@ -168,11 +185,20 @@ where
             let mut compressed_size = 0;
             let mut blocks = vec![];
             for chunk in data.as_ref().chunks(compression_block_size as usize) {
-                let data = compress(compression, chunk)?;
+                #[allow(unused_mut)]
+                let mut data = compress(compression, chunk)?;
+                let block_compressed_size = data.len();
+                #[cfg(feature = "encryption")]
+                if let super::Key::Some(key) = key {
+                    // each block is padded and encrypted separately
+                    crate::pak::pad_to_aes_block(&mut data);
+                    crate::pak::encrypt(key, &mut data);
+                }
                 compressed_size += data.len() as u64;
                 hasher.update(&data);
                 blocks.push(PartialBlock {
                     uncompressed_size: chunk.len(),
+                    unpadded_size: block_compressed_size,
                     data,
                 })
             }
@@ -181,8 +207,20 @@ where
         }
         None => {
             compression_block_size = 0;
-            hasher.update(data.as_ref());
-            (PartialEntryData::Slice(data), uncompressed_size)
+            match key {
+                #[cfg(feature = "encryption")]
+                super::Key::Some(key) => {
+                    let mut data = data.as_ref().to_vec();
+                    crate::pak::pad_to_aes_block(&mut data);
+                    crate::pak::encrypt(key, &mut data);
+                    hasher.update(&data[..uncompressed_size as usize]);
+                    (PartialEntryData::Encrypted(data), uncompressed_size)
+                }
+                _ => {
+                    hasher.update(data.as_ref());
+                    (PartialEntryData::Slice(data), uncompressed_size)
+                }
+            }
         }
     };
 
@@ -193,6 +231,7 @@ where
         compression_block_size,
         data,
         hash: Hash(hasher.finalize().into()),
+        encrypted: !matches!(key, super::Key::None),
     })
 }
 
@@ -230,4 +269,42 @@ fn compress(compression: Compression, data: &[u8]) -> Result<Vec<u8>> {
     };
 
     Ok(compressed)
+}
+
+#[cfg(all(test, feature = "compression", feature = "encryption"))]
+mod test {
+    use super::*;
+
+    /// Layout of UnrealPak's encrypted compressed entries: each block is padded to 16 bytes, the
+    /// block records end before the padding, and the hash covers the encrypted, padded blocks.
+    #[test]
+    fn test_encrypted_blocks() {
+        use aes::cipher::KeyInit;
+        use sha1::{Digest, Sha1};
+        let key = aes::Aes256::new_from_slice(&[7; 32]).unwrap();
+        let data = (0..300_000u64)
+            .map(|i| ((i * i) >> 7) as u8)
+            .collect::<Vec<_>>();
+
+        let partial = build_partial_entry(&[Compression::Zlib], &data, &key.into()).unwrap();
+        let entry = partial.build_entry(Version::V11, &mut vec![], 0).unwrap();
+        let mut written = vec![];
+        partial.write_data(&mut written).unwrap();
+
+        assert!(entry.is_encrypted());
+        let blocks = entry.blocks.unwrap();
+        assert!(blocks.len() > 1);
+        assert_eq!(entry.compressed, written.len() as u64);
+        assert_eq!(
+            entry.hash.unwrap().0,
+            <[u8; 20]>::from(Sha1::digest(&written))
+        );
+        let mut start = blocks[0].start;
+        for block in &blocks {
+            assert_eq!(block.start, start);
+            assert_ne!(block.end % 16, start % 16, "test data should need padding");
+            start += (block.end - block.start).next_multiple_of(16);
+        }
+        assert_eq!(start - blocks[0].start, written.len() as u64);
+    }
 }

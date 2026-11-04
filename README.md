@@ -27,7 +27,7 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-  -a, --aes-key <AES_KEY>  256 bit AES encryption key as base64 or hex string if the pak is encrypted
+  -a, --aes-key <AES_KEY>  256 bit AES encryption key as base64 or hex string to read an encrypted pak or encrypt one on pack
   -h, --help               Print help
   -V, --version            Print version
 ```
@@ -86,8 +86,7 @@ Unpacked 12345 files to MyEncryptedGame from MyEncryptedGame.pak
 [^3]: Zlib, Gzip, and Zstd are supported. Not all compression algorithms are
     available in all games.
 
-Supports reading encrypted (both index and/or data) and compressed paks.
-Writing does not support compression or encryption yet.
+Supports reading and writing encrypted (both index and/or data) and compressed paks.
 
 ## notes
 
