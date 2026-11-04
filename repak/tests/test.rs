@@ -214,6 +214,34 @@ fn test_rewrite_index(_version: repak::Version, _file_name: &str, bytes: &[u8]) 
     assert!(bytes == rewrite);
 }
 
+#[test]
+fn test_rewrite_keeps_encryption_guid() {
+    const GUID: u128 = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210;
+
+    let mut bytes = include_bytes!("packs/pack_v11.pak").to_vec();
+    // the footer is: encryption guid, encrypted flag, magic
+    let magic = bytes
+        .windows(4)
+        .rposition(|w| w == repak::MAGIC.to_le_bytes())
+        .unwrap();
+    bytes[magic - 17..magic - 1].copy_from_slice(&GUID.to_le_bytes());
+
+    let mut buf = std::io::Cursor::new(bytes);
+    let pak_reader = repak::PakBuilder::new().reader(&mut buf).unwrap();
+    assert_eq!(pak_reader.encryption_guid(), Some(GUID));
+
+    let mut rewrite = std::io::Cursor::new(
+        pak_reader
+            .into_pakwriter(buf)
+            .unwrap()
+            .write_index()
+            .unwrap()
+            .into_inner(),
+    );
+    let pak_reader = repak::PakBuilder::new().reader(&mut rewrite).unwrap();
+    assert_eq!(pak_reader.encryption_guid(), Some(GUID));
+}
+
 macro_rules! matrix_test {
     ( $name:literal, ($($version:literal $exp_version:expr),* $(,)?), $compress:tt, $encrypt:tt, $encryptindex:tt, $body:tt ) => {
         $( matrix_test_compress!($name, $version, $exp_version, $compress, $encrypt, $encryptindex, $body); )*
