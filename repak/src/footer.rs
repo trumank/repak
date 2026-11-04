@@ -85,7 +85,7 @@ impl Footer {
 
     pub fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), super::Error> {
         if self.version_major >= VersionMajor::EncryptionKeyGuid {
-            writer.write_u128::<LE>(0)?;
+            writer.write_u128::<LE>(self.encryption_uuid.unwrap_or_default())?;
         }
         if self.version_major >= VersionMajor::IndexEncryption {
             writer.write_bool(self.encrypted)?;

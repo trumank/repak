@@ -653,7 +653,7 @@ impl Pak {
         }
 
         let footer = super::footer::Footer {
-            encryption_uuid: None,
+            encryption_uuid: self.encryption_guid,
             encrypted: false,
             magic: super::MAGIC,
             version: self.version,
