@@ -405,4 +405,34 @@ mod roundtrip {
 
     roundtrip_tests!(pre_fname: V5, V7);
     roundtrip_tests!(fname: V8A, V8B, V9, V11);
+
+    #[test]
+    fn out_of_range_non_encoded_entry_is_an_error() {
+        let mut pak_writer = repak::PakBuilder::new().writer(
+            Cursor::new(vec![]),
+            repak::Version::V11,
+            "../../../".to_string(),
+            Some(0),
+        );
+        pak_writer.write_file("hello.txt", false, b"Hello").unwrap();
+        let mut buf = pak_writer.write_index().unwrap().into_inner();
+
+        // The full directory index stores each file as an FString name followed by its
+        // encoded-entry offset; a negative offset -n refers to non-encoded entry n - 1.
+        let name = b"\x0a\x00\x00\x00hello.txt\x00";
+        let at = buf
+            .windows(name.len())
+            .rposition(|window| window == name)
+            .expect("file name in the full directory index")
+            + name.len();
+        buf[at..at + 4].copy_from_slice(&(-5i32).to_le_bytes());
+
+        let result = repak::PakBuilder::new()
+            .reader_with_version(&mut Cursor::new(&buf), repak::Version::V11);
+
+        assert!(
+            matches!(result, Err(repak::Error::UnknownNonEncodedEntry(4, 0))),
+            "{result:?}"
+        );
+    }
 }
